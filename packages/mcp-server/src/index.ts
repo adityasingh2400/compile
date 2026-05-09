@@ -13,13 +13,15 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { StubNiaClient } from "@compile/nia";
+import { MemoryReceiptStore } from "@compile/identifier";
 import { MemoryRequestStore } from "./store.js";
 import { buildHandlers, TOOLS, TOOL_DESCRIPTIONS } from "./handlers.js";
 import type { McpToolName } from "@compile/schemas";
 
 const nia = new StubNiaClient();
 const store = new MemoryRequestStore();
-const handlers = buildHandlers({ nia, store });
+const receipts = new MemoryReceiptStore();
+const handlers = buildHandlers({ nia, store, receipts });
 
 const server = new Server(
   { name: "compile", version: "0.0.0" },

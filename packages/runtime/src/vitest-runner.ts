@@ -115,7 +115,17 @@ export async function runHoldout(args: RunHoldoutArgs): Promise<HoldoutRunResult
   const dir = await mkdtemp(join(args.cwd ?? tmpdir(), "compile-gate-"));
   try {
     await writeFile(join(dir, "_runtime.ts"), HARNESS_RUNTIME);
-    await writeFile(join(dir, "code.ts"), args.code);
+    // Strip whatever path the agent imported llmFallback from and replace it
+    // with our injected _runtime, so emitted code resolves regardless of the
+    // path convention the agent picked (./fallback, ./util, etc.).
+    const codeWithRewrittenImports = args.code.replace(
+      /import\s*\{([^}]*)\}\s*from\s*['"][^'"]+['"]\s*;?/g,
+      (full, names: string) =>
+        names.includes("llmFallback")
+          ? `import { llmFallback } from "./_runtime";`
+          : full,
+    );
+    await writeFile(join(dir, "code.ts"), codeWithRewrittenImports);
     await writeFile(
       join(dir, "holdout.test.ts"),
       holdoutTestSource({
@@ -174,10 +184,16 @@ export async function runHoldout(args: RunHoldoutArgs): Promise<HoldoutRunResult
 async function runVitest(cwd: string): Promise<VitestJsonReport> {
   const bin = await findVitestBin();
   return new Promise((res, reject) => {
+    // Strip VITEST_* env vars from the parent so the child doesn't inherit a
+    // pool/worker config from a wrapping vitest run (foot-gun: vitest-in-vitest).
+    const env: NodeJS.ProcessEnv = { ...process.env, CI: "1" };
+    for (const k of Object.keys(env)) {
+      if (k.startsWith("VITEST_")) delete env[k];
+    }
     const proc = spawn(
       bin,
-      ["run", "--reporter=json", "--no-color", "--root", cwd],
-      { cwd, env: { ...process.env, CI: "1" } },
+      ["run", "--reporter=json", "--no-color", "--root", cwd, "--pool=forks"],
+      { cwd, env },
     );
     let stdout = "";
     let stderr = "";
