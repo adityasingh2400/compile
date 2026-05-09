@@ -9,8 +9,8 @@ Built for the [Nozomio Hackathon](https://luma.com/rshibq6i) — May 9, 2026, EF
 ## Install
 
 ```bash
-git clone https://github.com/rmotgi1227/Compile.git
-cd Compile
+git clone https://github.com/adityasingh2400/compile.git
+cd compile
 npm install
 npm run build      # all workspaces
 npm test           # 100+ tests across the monorepo
@@ -204,6 +204,31 @@ animation values (works fully offline).
 
 Append `?source=real` to drive from real scanner output instead of the canned timeline.
 
+### Demo flow (post-audit)
+
+The audit page settles on a per-workflow constellation (clusters of synthetic
+calls). From there the workspace drives each workflow through three live pages
+fed by daemon SSE events:
+
+| Stage | Page | What you see |
+|---|---|---|
+| `codification` | `CodegenLivePage` | The agent writes the codified handler; Tensorlake holdout gate ticks toward N/N. |
+| `vault` | `VaultLivePage` | Functions fan out into positive / negative buckets with per-day hits + dollars saved. |
+| `production` | `RoutingLivePage` | Live request stream with positive / negative / unknown counters, sparkline of $/sec, rolling RPM. |
+
+Hotkeys (when audit is parked on the manifest screen):
+
+- `Enter` / `→` / `Space` — skip straight into the workspace
+- `q` / `w` / `e` — jump to codify / vault / route within the active workflow
+- `1` / `2` / `3` — switch active workflow tab
+
+To drive the live pages from the fake daemon (no real backend needed):
+
+```bash
+npm run daemon:fake     # serves /daemon/events on :8787
+npm run dev:ui          # UI subscribes automatically via daemon-stream.ts
+```
+
 ### Cleanup (after demo)
 
 ```bash
@@ -238,7 +263,8 @@ npx tl sbx terminate <ID> [<ID>...]   # terminate them (or just walk away — au
 | `@compile/nia` | Nia API client (Vault + Document Agent) |
 | `@compile/stream` | `IBootstrapStream` interface + Memory and Convex implementations |
 | `@compile/mcp-server` | The MCP server with 9 tools — `npm pack`-ready as `@compile/mcp` |
-| `@compile/ui` | The 11-page bootstrap demo (Vite + React + canvas constellation) |
+| `@compile/daemon` | Always-on split-runtime daemon — emits live SSE events the UI subscribes to |
+| `@compile/ui` | The 11-page demo: landing → audit (clustered constellation) → codify → vault → route |
 
 ---
 
@@ -265,6 +291,8 @@ npm run live-smoke -w @compile/runtime      # 3-phase smoke: SDK + gate + Phi
 npm run build:phi-image -w @compile/runtime # rebuild the Tensorlake Phi sandbox image
 npm run harness                             # synthesizer harness on hardcoded clusters
 npm run snapshot                            # regenerate live bootstrap snapshot
+npm run daemon:fake                         # serve fake /daemon/events on :8787 for UI live pages
+npm run dev:daemon                          # real always-on @compile/daemon
 ```
 
 ---
