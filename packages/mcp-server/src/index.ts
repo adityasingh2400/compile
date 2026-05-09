@@ -14,6 +14,11 @@ import {
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { StubNiaClient } from "@compile/nia";
 import { MemoryReceiptStore } from "@compile/identifier";
+import {
+  MemoryBootstrapStream,
+  NoopBootstrapStream,
+  type IBootstrapStream,
+} from "@compile/stream";
 import { MemoryRequestStore } from "./store.js";
 import {
   buildHandlers,
@@ -27,7 +32,15 @@ const nia = new StubNiaClient();
 const store = new MemoryRequestStore();
 const receipts = new MemoryReceiptStore();
 const bootstrap = new MemoryBootstrapStore();
-const handlers = buildHandlers({ nia, store, receipts, bootstrap });
+// Default: noop stream — the stdio MCP server doesn't have a Convex
+// deployment yet. Set COMPILE_STREAM=memory to capture events in-process
+// for local rehearsal; Lane C swaps in ConvexBootstrapStream when the
+// deployment is live.
+const stream: IBootstrapStream =
+  process.env.COMPILE_STREAM === "memory"
+    ? new MemoryBootstrapStream()
+    : new NoopBootstrapStream();
+const handlers = buildHandlers({ nia, store, receipts, bootstrap, stream });
 
 const server = new Server(
   { name: "compile", version: "0.0.0" },
