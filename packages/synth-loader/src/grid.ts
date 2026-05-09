@@ -172,7 +172,13 @@ export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
 
     // Periodic live_metrics + cluster_snapshot emits. Throttled so we don't
     // hammer Convex with sub-millisecond writes — Page 6 chrome animates
-    // smoothly at ~10Hz.
+    // smoothly at ~10Hz. Live metrics carry schema_stability + tier_mix +
+    // throughput; oracle_agreement is left at 0 here because the honest
+    // pairwise computation is O(oracle × candidate) and runs every
+    // metricsIntervalMs would make 100K runs unbounded. The final emit at
+    // run completion does the full computation. This matches the DESIGN.md
+    // hero visual where oracle agreement only resolves at second 25–28
+    // ("color resolves… 7 sub-patterns found, 6 Tier 1, 1 Tier 2").
     if (stream && runId) {
       const now = performance.now();
       if (now - lastEmitAt >= metricsIntervalMs) {
@@ -189,12 +195,10 @@ export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
           tier_mix: { ...tier_mix },
           axis_scores: {
             schema_stability: round3(
-              stabilityScore(Array.from(candidateByInput.values())),
+              clusterer.dominantShare(),
             ),
             determinism: 0,
-            oracle_agreement: round3(
-              oracleAgreementScore(oracleByInput, candidateByInput),
-            ),
+            oracle_agreement: 0,
             economic_value: economicValueFromCallSite(
               args.call_site,
               args.total_calls,
@@ -366,12 +370,17 @@ function oracleAgreementScore(
   }
   // When candidate path didn't see the oracle inputs, synthesize agreement
   // from shape-only — a real run with shared inputs gives a tighter score.
+  // The candidate-shape SET is built ONCE and probed in O(1); a previous
+  // version rebuilt the array inside the filter callback for each oracle
+  // entry, which made this O(oracle × candidate) and burned ~28s on the
+  // 100K bench at the very end of the run.
   if (agreed === 0 && total > 0) {
-    const shapeAgreed = Array.from(oracleByInput.values()).filter((o) => {
-      const sig = shapeSignature(o);
-      const candidateShapes = Array.from(candidateByInput.values()).map(shapeSignature);
-      return candidateShapes.includes(sig);
-    }).length;
+    const candidateShapes = new Set<string>();
+    for (const v of candidateByInput.values()) candidateShapes.add(shapeSignature(v));
+    let shapeAgreed = 0;
+    for (const o of oracleByInput.values()) {
+      if (candidateShapes.has(shapeSignature(o))) shapeAgreed++;
+    }
     return shapeAgreed / total;
   }
   return agreed / total;
