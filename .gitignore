@@ -1,0 +1,44 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+*.log
+.DS_Store
+.env
+.env.local
+.env.*.local
+
+# Convex
+.convex/
+
+# Python (YOLO labeling / training)
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# YOLO / ML artifacts
+runs/
+*.pt
+*.onnx
+weights/
+datasets/
+
+# Vercel
+.vercel
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+
+# Local data
+data/
+incidents/*.json
+!incidents/.gitkeep
