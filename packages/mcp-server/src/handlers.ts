@@ -34,7 +34,7 @@ import {
   type CandidateCluster,
 } from "@compile/identifier";
 import { scanRepo } from "@compile/scanner";
-import { runStage2 } from "@compile/synth-loader";
+import { runStage2, type IOracleClient } from "@compile/synth-loader";
 import {
   NoopBootstrapStream,
   type IBootstrapStream,
@@ -115,6 +115,14 @@ export interface HandlerDeps {
    * deterministic, used by tests + the Friday harness.
    */
   tensorlake?: ITensorlakeClient;
+  /**
+   * Real frontier oracle (D9, D10). The 1% sample in Stage-2 runs through
+   * this client — production callers wrap AnthropicOracleClient in
+   * BudgetedOracleClient + OracleWithLocalFallback so a flaky API or
+   * budget trip degrades to stub-oracle samples for the remainder of the
+   * run, not crashes. When omitted, runStage2 builds StubOracleClient.
+   */
+  oracle?: IOracleClient;
   /**
    * Resolves the active run_id. The bootstrap store is the natural home —
    * scan_repo sets it; subsequent handlers reuse it. Defaults to a
@@ -325,6 +333,7 @@ export function buildHandlers(deps: HandlerDeps): Record<
         stream,
         run_id: rid,
         tensorlake,
+        oracle: deps.oracle,
       });
       deps.bootstrap.putRun(run);
       // Page 6 → Page 7: constellation freezes, cluster centroids labeled.
