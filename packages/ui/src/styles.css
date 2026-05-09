@@ -7049,13 +7049,15 @@ button {
 .audit-org {
   position: relative;
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--cream);
   color: var(--ink);
   font-family: var(--sans);
   display: flex;
   flex-direction: column;
-  padding: 24px clamp(24px, 4.5vw, 64px) 16px;
+  padding: 24px clamp(24px, 4.5vw, 64px) 96px;
   isolation: isolate;
   animation: audit-org-fade-in 460ms var(--ease-out) both;
 }
@@ -7561,8 +7563,10 @@ button {
 .audit-org-wf-canvas {
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1.05;
-  margin-top: 18px;
+  aspect-ratio: 1 / 0.62;
+  max-height: calc(100vh - 360px);
+  min-height: 320px;
+  margin-top: 12px;
   transition: transform 460ms var(--ease-out);
 }
 
@@ -7604,14 +7608,17 @@ button {
 }
 
 .audit-org-wf-blob {
-  transition: opacity 360ms var(--ease-out);
+  /* Discs must be opaque for the gooey threshold to grab them as
+     a single blob. We dial visual softness via group opacity. */
+  opacity: 0.22;
+  transition: opacity 460ms var(--ease-out);
 }
 
-.audit-org-wf-blob.is-faded { opacity: 0.18; }
-.audit-org-wf-blob.is-focus { opacity: 1; }
+.audit-org-wf-blob.is-faded { opacity: 0.06; }
+.audit-org-wf-blob.is-focus { opacity: 0.34; }
 
 .audit-org-wf-blob-disc {
-  fill: rgba(192, 57, 43, 0.16);
+  fill: var(--maroon);
   transition: r 520ms var(--ease-out);
 }
 
@@ -7622,26 +7629,26 @@ button {
 .audit-org-wf-blob[data-cluster="spam"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="ai_slop"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="real_human"] .audit-org-wf-blob-disc {
-  fill: rgba(231, 76, 60, 0.18);
+  fill: var(--maroon-bright);
 }
 .audit-org-wf-blob[data-cluster="warmth"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="inner"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="social"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="vibe"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="friend"] .audit-org-wf-blob-disc {
-  fill: rgba(255, 107, 107, 0.18);
+  fill: var(--coral);
 }
 .audit-org-wf-blob[data-cluster="logistics"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="meeting"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="recruiter"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="vc"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="founder_pitch"] .audit-org-wf-blob-disc {
-  fill: rgba(255, 159, 67, 0.20);
+  fill: var(--orange);
 }
 .audit-org-wf-blob[data-cluster="noise"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="dormant"] .audit-org-wf-blob-disc,
 .audit-org-wf-blob[data-cluster="greeting"] .audit-org-wf-blob-disc {
-  fill: rgba(192, 57, 43, 0.10);
+  fill: var(--ink-secondary);
 }
 
 /* Cluster tag (label floating at the wedge centroid). No rectangle —
@@ -7721,6 +7728,18 @@ button {
   box-shadow: 0 0 0 0 rgba(192, 57, 43, 0);
   transition: all 280ms var(--ease-out);
   flex-shrink: 0;
+}
+
+/* Satellite (unlabeled) volume nodes — smaller and dimmer so they
+   read as call density without competing with the labeled samples. */
+.audit-org-node.is-satellite .audit-org-node-dot {
+  width: 4px;
+  height: 4px;
+  opacity: 0.28;
+}
+.audit-org-node.is-satellite .audit-org-node-label { display: none; }
+.audit-org-node.is-satellite.is-focus .audit-org-node-dot {
+  opacity: 0.5;
 }
 
 /* per-cluster hue tints — subtle. */

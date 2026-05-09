@@ -1,0 +1,32 @@
+{
+  "judge_no_hallucination": {
+    "fn": "judge_no_hallucination",
+    "tier": "tier_1",
+    "function_name": "judge_no_hallucination",
+    "code": "export function judge_no_hallucination(input: { prompt: string }) {\n  const text = input.prompt;\n  const isClean = /\\bclean\\b/i.test(text);\n  const verdict: \"PASS\" | \"FAIL\" = isClean ? \"PASS\" : \"FAIL\";\n  const pattern = text.match(/pattern:\\s*\"([^\"]+)\"/)?.[1] ?? \"\";\n  return {\n    verdict,\n    evidence: isClean ? \"no known hallucination patterns matched\" : pattern,\n    reasoning: isClean\n      ? \"code matches expected idiomatic shape for this version\"\n      : `lexical match on known-bad pattern: ${pattern}`,\n  };\n}"
+  },
+  "judge_correct_replacements": {
+    "fn": "judge_correct_replacements",
+    "tier": "tier_1",
+    "function_name": "judge_correct_replacements",
+    "code": "export function judge_correct_replacements(input: { prompt: string }) {\n  const t = input.prompt.toLowerCase();\n  const hasLegacy = /proxyclient|formstate|generateobject|forwardref|email\\(\\)|uuid\\(\\)|\\bip\\(\\)|middleware\\.ts/.test(t);\n  const correct = !hasLegacy;\n  return {\n    verdict: correct ? (\"PASS\" as const) : (\"FAIL\" as const),\n    evidence: correct ? \"all replacements match v_new specification\" : \"legacy pattern detected in candidate\",\n    reasoning: correct\n      ? \"migration map covers all observed legacy patterns\"\n      : \"candidate left v_old pattern unchanged\",\n  };\n}"
+  },
+  "judge_correct_import": {
+    "fn": "judge_correct_import",
+    "tier": "tier_1",
+    "function_name": "judge_correct_import",
+    "code": "export function judge_correct_import(input: { prompt: string }) {\n  const text = input.prompt;\n  const expected = text.match(/expected:\\s*([^\\n]+)/)?.[1] ?? \"\";\n  const codeLine = text.match(/code:\\s*\"([^\"]+)\"/)?.[1] ?? \"\";\n  const parts = expected.split(/\\s+/);\n  const name = parts[0] ?? \"\";\n  const from = parts[2] ?? \"\";\n  const correct = codeLine.includes(name) && codeLine.includes(`'${from}'`);\n  return {\n    verdict: (correct ? \"PASS\" : \"FAIL\") as \"PASS\" | \"FAIL\",\n    evidence: codeLine.slice(0, 80),\n    reasoning: correct\n      ? `imports ${name} from ${from} as expected`\n      : `expected import of ${name} from ${from} not found`,\n  };\n}"
+  },
+  "judge_correct_api_usage": {
+    "fn": "judge_correct_api_usage",
+    "tier": "tier_2",
+    "function_name": "judge_correct_api_usage",
+    "code": "export function judge_correct_api_usage(input: { prompt: string }) {\n  const t = input.prompt.toLowerCase();\n  const correct = /nextresponse|httpsubscriptionlink|async function\\*|await cookies/.test(t);\n  return {\n    verdict: (correct ? \"PASS\" : \"FAIL\") as \"PASS\" | \"FAIL\",\n    evidence: input.prompt.match(/code:\\s*\"([^\"]+)\"/)?.[1]?.slice(0, 80) ?? \"\",\n    reasoning: correct\n      ? \"candidate uses expected version-correct API surface\"\n      : \"candidate API call doesn't match expected pattern\",\n  };\n}"
+  },
+  "judge_correct_alternatives": {
+    "fn": "judge_correct_alternatives",
+    "tier": "tier_2",
+    "function_name": "judge_correct_alternatives",
+    "code": "export function judge_correct_alternatives(input: { prompt: string }) {\n  const findings = input.prompt.match(/findings:\\s*\\[([^\\]]+)\\]/)?.[1] ?? \"\";\n  const correct = findings.length > 0;\n  return {\n    verdict: (correct ? \"PASS\" : \"FAIL\") as \"PASS\" | \"FAIL\",\n    evidence: findings.slice(0, 80),\n    reasoning: correct\n      ? \"candidate covers all identified findings with version-correct alternatives\"\n      : \"candidate misses one or more findings\",\n  };\n}"
+  }
+}

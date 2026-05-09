@@ -1,0 +1,39 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"agent": {
+		"coder": {
+			"model": "$MODEL",
+			"maxTokens": 16000
+		},
+		"task": {
+			"model": "$MODEL",
+			"maxTokens": 16000
+		},
+		"title": {
+			"model": "$MODEL",
+			"maxTokens": 80
+		},
+		"summarizer": {
+			"model": "$MODEL",
+			"maxTokens": 5000
+		}
+	},
+	"mcp": {
+		"context7": {
+			"type": "remote",
+			"url": "https://mcp.context7.com/mcp",
+			"headers": {
+				"CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+			}
+		}
+	},
+	"tools": {
+		"skill": false
+	},
+	"permission": {
+		"skill": "deny",
+		"edit": "allow",
+		"write": "allow",
+		"bash": "allow"
+	}
+}

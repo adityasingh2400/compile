@@ -1,49 +1,41 @@
 {
-  "generated_at": "2026-05-09T23:07:57.384Z",
-  "total_traces": 369,
+  "generated_at": "2026-05-10T00:14:54.517Z",
+  "total_traces": 339,
   "threshold": 50,
   "buckets": {
-    "folk:classify_message_intent:v1": {
+    "nia-bench:judge_no_hallucination:v1": {
       "count": 95,
       "status": "WILL_COMPILE"
     },
-    "folk:classify_inbound_dm_quality:v1": {
-      "count": 88,
+    "nia-bench:judge_correct_replacements:v1": {
+      "count": 78,
       "status": "WILL_COMPILE"
     },
-    "folk:classify_support_ticket_priority:v1": {
-      "count": 72,
+    "nia-bench:judge_correct_import:v1": {
+      "count": 62,
       "status": "WILL_COMPILE"
     },
-    "folk:extract_event_from_message:v1": {
+    "nia-bench:judge_correct_api_usage:v1": {
       "count": 38,
       "status": "BELOW_THRESHOLD"
     },
-    "folk:pick_response_template:v1": {
+    "nia-bench:judge_correct_alternatives:v1": {
       "count": 28,
       "status": "BELOW_THRESHOLD"
     },
-    "folk:extract_location_from_post:v1": {
+    "nia-bench:judge_overall_quality:v1": {
       "count": 18,
       "status": "FRONTIER_ZONE"
     },
-    "folk:summarize_person_status:v1": {
+    "nia-bench:apply_majority_vote_disagreement:v1": {
       "count": 12,
       "status": "FRONTIER_ZONE"
     },
-    "folk:draft_personal_response_to_dm:v1": {
+    "nia-bench:classify_hallucination_complex:v1": {
       "count": 8,
-      "status": "FRONTIER_ZONE"
-    },
-    "folk:resolve_complex_support_ticket:v1": {
-      "count": 6,
-      "status": "FRONTIER_ZONE"
-    },
-    "folk:infer_company_context:v1": {
-      "count": 4,
       "status": "FRONTIER_ZONE"
     }
   },
-  "spend_usd": 1.2,
+  "spend_usd": 4.56,
   "timespan_hours": 24
 }
