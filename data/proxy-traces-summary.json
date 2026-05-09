@@ -1,49 +1,49 @@
 {
-  "generated_at": "2026-05-09T21:04:26.784Z",
-  "total_traces": 303,
+  "generated_at": "2026-05-09T23:07:57.384Z",
+  "total_traces": 369,
   "threshold": 50,
   "buckets": {
     "folk:classify_message_intent:v1": {
-      "count": 78,
+      "count": 95,
       "status": "WILL_COMPILE"
     },
-    "folk:score_message_urgency:v1": {
-      "count": 62,
+    "folk:classify_inbound_dm_quality:v1": {
+      "count": 88,
       "status": "WILL_COMPILE"
     },
-    "folk:score_relationship_warmth:v1": {
-      "count": 56,
+    "folk:classify_support_ticket_priority:v1": {
+      "count": 72,
       "status": "WILL_COMPILE"
     },
     "folk:extract_event_from_message:v1": {
       "count": 38,
       "status": "BELOW_THRESHOLD"
     },
-    "folk:summarize_thread_for_memory:v1": {
-      "count": 26,
+    "folk:pick_response_template:v1": {
+      "count": 28,
       "status": "BELOW_THRESHOLD"
     },
-    "folk:apply_user_writing_style:v1": {
+    "folk:extract_location_from_post:v1": {
       "count": 18,
       "status": "FRONTIER_ZONE"
     },
-    "folk:retrieve_relevant_memory:v1": {
+    "folk:summarize_person_status:v1": {
       "count": 12,
       "status": "FRONTIER_ZONE"
     },
-    "folk:infer_relationship_context:v1": {
-      "count": 7,
+    "folk:draft_personal_response_to_dm:v1": {
+      "count": 8,
       "status": "FRONTIER_ZONE"
     },
-    "folk:summarize_recent_messages:v1": {
+    "folk:resolve_complex_support_ticket:v1": {
+      "count": 6,
+      "status": "FRONTIER_ZONE"
+    },
+    "folk:infer_company_context:v1": {
       "count": 4,
-      "status": "FRONTIER_ZONE"
-    },
-    "folk:draft_reply_in_user_voice:v1": {
-      "count": 2,
       "status": "FRONTIER_ZONE"
     }
   },
-  "spend_usd": 0.92,
+  "spend_usd": 1.2,
   "timespan_hours": 24
 }

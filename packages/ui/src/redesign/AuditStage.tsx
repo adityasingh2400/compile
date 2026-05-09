@@ -251,54 +251,74 @@ function formatMoney(n: number): string {
 }
 
 interface NodePlacement {
-  /** node x in [0, 1] within the column */
+  /** node x in [0, 1] within the canvas */
   x: number;
   y: number;
   /** sub-cluster slug */
   cluster: string;
   /** label text */
   label: string;
+  /** centroid of this node's cluster (normalized) */
+  cx: number;
+  cy: number;
+  /** radius of this node's cluster region (normalized) */
+  cr: number;
 }
 
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
 /**
- * Deterministic placement so HMR / remount keeps nodes still.
- * Tight golden-angle scatter inside the column with a small jitter
- * keyed on (workflowIndex, nodeIndex) so workflows look unique.
+ * Deterministic, disk-filling placement.
+ *
+ * Clusters are arranged on a soft ring around the canvas center, sized by
+ * sample count (more samples → bigger blob). Within each cluster, samples
+ * are packed via a Vogel sunflower so they fill the *whole disk*, center
+ * included — not just two perimeter rings.
  */
 function placeNodes(
   workflowIndex: number,
   samples: { label: string; cluster: string }[],
 ): NodePlacement[] {
-  const out: NodePlacement[] = [];
-  // Pre-bucket by cluster so each cluster lives in roughly the same
-  // angular wedge — that's what gives the visual its grouping.
   const byCluster = new Map<string, { label: string; cluster: string }[]>();
   for (const s of samples) {
     if (!byCluster.has(s.cluster)) byCluster.set(s.cluster, []);
     byCluster.get(s.cluster)!.push(s);
   }
   const clusterOrder = [...byCluster.keys()];
+  const N = clusterOrder.length;
   const TAU = Math.PI * 2;
-  let placedIdx = 0;
+
+  // Cluster ring radius: keep clusters comfortably inside the canvas.
+  const ringR = N <= 2 ? 0.0 : N <= 4 ? 0.26 : 0.30;
+  // Phase offset keyed on workflow so each workflow's layout feels unique.
+  const phase = (workflowIndex * 0.37) % 1;
+
+  // Per-cluster radius — proportional to sqrt(count) so dense clusters
+  // get bigger blobs but small ones don't shrivel.
+  const total = samples.length || 1;
+  const baseR = N === 1 ? 0.42 : N === 2 ? 0.28 : N <= 4 ? 0.20 : 0.17;
+
+  const out: NodePlacement[] = [];
   clusterOrder.forEach((cluster, ci) => {
     const arr = byCluster.get(cluster)!;
-    const wedgeStart = (ci / clusterOrder.length) * TAU;
-    const wedgeEnd = ((ci + 1) / clusterOrder.length) * TAU;
+    const a = (ci / N + phase) * TAU;
+    const cx = 0.5 + Math.cos(a) * ringR;
+    // Squash vertically so the constellation feels landscape-friendly.
+    const cy = 0.5 + Math.sin(a) * ringR * 0.78;
+    const share = arr.length / total;
+    const cr = baseR * (0.78 + 0.6 * Math.sqrt(share * N));
+
     arr.forEach((s, j) => {
-      const t = (j + 0.5) / arr.length;
-      const angle = wedgeStart + t * (wedgeEnd - wedgeStart);
-      // Two visual rings; ring decided by sample index parity within cluster.
-      const ring = j % 2 === 0 ? 0.32 : 0.46;
-      // Jitter keyed on (workflowIndex, placedIdx) — deterministic per node.
-      const jitterSeed = (workflowIndex * 977 + placedIdx * 131) % 1000;
-      const jr = ((jitterSeed % 23) - 11) / 220; // ±0.05
-      const ja = ((jitterSeed % 17) - 8) / 70; // small angular jitter
-      const r = ring + jr;
-      const a = angle + ja;
-      const x = 0.5 + Math.cos(a) * r;
-      const y = 0.5 + Math.sin(a) * r * 0.78; // squash vertically
-      out.push({ x, y, cluster, label: s.label });
-      placedIdx += 1;
+      // Vogel disk fill: r = cr * sqrt((j+0.5)/count), theta = j*GOLDEN_ANGLE.
+      // Add deterministic jitter so the lattice doesn't read as too perfect.
+      const jitterSeed = (workflowIndex * 977 + ci * 211 + j * 131) % 1000;
+      const jr = ((jitterSeed % 19) - 9) / 360; // ±~0.025
+      const ja = ((jitterSeed % 13) - 6) / 60;
+      const r = cr * Math.sqrt((j + 0.5) / arr.length) + jr;
+      const theta = j * GOLDEN_ANGLE + ja + ci * 0.7;
+      const x = cx + Math.cos(theta) * r;
+      const y = cy + Math.sin(theta) * r * 0.92;
+      out.push({ x, y, cluster, label: s.label, cx, cy, cr });
     });
   });
   return out;
@@ -347,7 +367,9 @@ function WorkflowColumn({
     if (!emit) return;
     let cancelled = false;
     const start = performance.now();
-    const STAGGER = 90 + index * 25;
+    // Faster spawn — nodes are pre-baked, no reason to drip-feed.
+    // ~28ms per node so a 16-node workflow fully populates in ~450ms.
+    const STAGGER = 26;
     const tick = (now: number): void => {
       if (cancelled) return;
       const n = Math.min(
@@ -439,19 +461,71 @@ function WorkflowColumn({
         {/* soft halo — pure aesthetic, no border */}
         <div className="audit-org-wf-halo" aria-hidden />
 
-        {/* Cluster tags float at each wedge centroid. Click to zoom. */}
+        {/* Gooey metaball layer — one merged blob per cluster that
+            naturally reshapes as nodes spawn in. Each visible node
+            contributes a soft disc; the SVG filter merges them with
+            a threshold so they read as a single organic surface. */}
+        <svg
+          className="audit-org-wf-blobs"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden
+        >
+          <defs>
+            <filter id={`goo-${workflow.id}`}>
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" />
+              <feColorMatrix
+                values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10"
+              />
+              <feBlend in="SourceGraphic" />
+            </filter>
+          </defs>
+          {pack.clusters.map((c) => {
+            const clusterNodes = placements.filter((p) => p.cluster === c.slug);
+            if (clusterNodes.length === 0) return null;
+            const isFocus = focusedCluster === c.slug;
+            const isFaded = focusedCluster != null && !isFocus;
+            // Disc radius scales with cluster size so denser clusters
+            // produce a larger merged blob. Tuned so adjacent nodes
+            // overlap well enough for the gooey filter to fuse them.
+            const baseR = Math.max(3.2, clusterNodes[0]!.cr * 18);
+            return (
+              <g
+                key={c.slug}
+                className={`audit-org-wf-blob ${isFocus ? "is-focus" : ""} ${
+                  isFaded ? "is-faded" : ""
+                }`}
+                data-cluster={c.slug}
+                filter={`url(#goo-${workflow.id})`}
+              >
+                {clusterNodes.map((n, idx) => {
+                  const placedIdx = placements.indexOf(n);
+                  const isVisible = placedIdx < visible;
+                  return (
+                    <circle
+                      key={idx}
+                      cx={n.x * 100}
+                      cy={n.y * 100}
+                      r={isVisible ? baseR : 0}
+                      className="audit-org-wf-blob-disc"
+                    />
+                  );
+                })}
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* Cluster tags float at each cluster centroid. Click to zoom. */}
         {pack.clusters.map((c, ci) => {
           const clusterNodes = placements.filter((p) => p.cluster === c.slug);
           if (clusterNodes.length === 0) return null;
-          const cx =
-            clusterNodes.reduce((acc, n) => acc + n.x, 0) / clusterNodes.length;
-          const cy =
-            clusterNodes.reduce((acc, n) => acc + n.y, 0) / clusterNodes.length;
-          const dx = cx - 0.5;
-          const dy = cy - 0.5;
-          const len = Math.max(0.02, Math.hypot(dx, dy));
-          const tx = 0.5 + (dx / len) * (Math.hypot(dx, dy) + 0.06);
-          const ty = 0.5 + (dy / len) * (Math.hypot(dx, dy) + 0.06);
+          const cx = clusterNodes[0]!.cx;
+          const cy = clusterNodes[0]!.cy;
+          const cr = clusterNodes[0]!.cr;
+          // Anchor tag just above the cluster blob.
+          const tx = cx;
+          const ty = Math.max(0.04, cy - cr * 0.92 - 0.04);
           const visibleCount = clusterNodes.filter((n) => {
             const idx = placements.indexOf(n);
             return idx < visible;
@@ -665,7 +739,38 @@ function WorkflowGrid(): JSX.Element {
 
   const emit = phase === "filtering" || phase === "manifest" || phase === "transition";
 
+  // Active tab. Defaults to first workflow; advances automatically as
+  // more workflows are classified so the audit feels like it's narrating
+  // through the discovered call sites.
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [userPicked, setUserPicked] = useState(false);
+  useEffect(() => {
+    if (userPicked) return;
+    const last = identifiedWorkflows[identifiedWorkflows.length - 1];
+    if (last && last.id !== activeTabId) setActiveTabId(last.id);
+  }, [identifiedWorkflows, userPicked, activeTabId]);
+
+  // Number-key shortcuts (1..9) hop between tabs.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key < "1" || e.key > "9") return;
+      const n = Number(e.key) - 1;
+      const wf = identifiedWorkflows[n];
+      if (!wf) return;
+      setUserPicked(true);
+      setActiveTabId(wf.id);
+      setFocused(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [identifiedWorkflows]);
+
   if (identifiedWorkflows.length === 0) return <></>;
+
+  const activeWorkflow =
+    identifiedWorkflows.find((w) => w.id === activeTabId) ??
+    identifiedWorkflows[0]!;
+  const activeIndex = identifiedWorkflows.indexOf(activeWorkflow);
 
   const focusedWorkflow = focused
     ? identifiedWorkflows.find((w) => w.id === focused.workflowId) ?? null
@@ -676,35 +781,62 @@ function WorkflowGrid(): JSX.Element {
 
   return (
     <>
+      <nav className="audit-org-tabs" aria-label="Workflows">
+        {identifiedWorkflows.map((wf, i) => {
+          const isActive = wf.id === activeWorkflow.id;
+          const pack = getSamplePack(wf.function_name);
+          return (
+            <button
+              key={wf.id}
+              type="button"
+              className={`audit-org-tab ${isActive ? "is-active" : ""} ${wf.tier}`}
+              onClick={() => {
+                setUserPicked(true);
+                setActiveTabId(wf.id);
+                setFocused(null);
+              }}
+              aria-pressed={isActive}
+            >
+              <span className="audit-org-tab-num">
+                {(i + 1).toString().padStart(2, "0")}
+              </span>
+              <span className="audit-org-tab-name">{wf.display_name}</span>
+              <span className="audit-org-tab-meta">
+                {pack.clusters.length} clusters
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+
       <div
-        className={`audit-org-grid wf-count-${identifiedWorkflows.length} ${
-          focused ? "has-focus" : ""
-        }`}
+        className={`audit-org-grid is-tabbed ${focused ? "has-focus" : ""}`}
         data-phase={phase}
         onClick={(e) => {
-          // Click outside any node/tag clears the selection.
           if (e.target === e.currentTarget && focused) {
             setFocused(null);
           }
         }}
       >
-        {identifiedWorkflows.map((wf, i) => (
-          <WorkflowColumn
-            key={wf.id}
-            workflow={wf}
-            index={i}
-            reveal
-            emit={emit}
-            focusedCluster={focused?.workflowId === wf.id ? focused.cluster : null}
-            anyFocused={focused != null}
-            onFocusCluster={(cluster) =>
-              setFocused(cluster ? { workflowId: wf.id, cluster } : null)
-            }
-            onOpenNode={(nodeIdx) =>
-              setOpenNode({ workflowId: wf.id, nodeIdx })
-            }
-          />
-        ))}
+        <WorkflowColumn
+          key={activeWorkflow.id}
+          workflow={activeWorkflow}
+          index={activeIndex}
+          reveal
+          emit={emit}
+          focusedCluster={
+            focused?.workflowId === activeWorkflow.id ? focused.cluster : null
+          }
+          anyFocused={focused != null}
+          onFocusCluster={(cluster) =>
+            setFocused(
+              cluster ? { workflowId: activeWorkflow.id, cluster } : null,
+            )
+          }
+          onOpenNode={(nodeIdx) =>
+            setOpenNode({ workflowId: activeWorkflow.id, nodeIdx })
+          }
+        />
       </div>
 
       {focusedWorkflow && focused ? (

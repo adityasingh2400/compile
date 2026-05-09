@@ -93,18 +93,39 @@ const WORKFLOW_SCALE_BIAS: Record<string, number> = {
   resolve_company_domain: 0.5,
   summarize_support_thread: 0.4,
   rewrite_email_formal: 0.3,
-  // Folk — inbound msg pipeline runs on every text, ×2 hot-path bias.
-  classify_message_intent: 2.0,
+  // ── Folk — legacy messaging/memory bias (kept for any stragglers
+  // from older trace corpora). Newer three-pillar entries below
+  // override matching keys on the same key, but leave non-overlap
+  // entries (e.g. score_message_urgency) for backwards compat.
   score_message_urgency: 1.6,
-  extract_event_from_message: 0.9,
   apply_user_writing_style: 0.5,
   draft_reply_in_user_voice: 1.2,
-  // Folk — memory layer; warmth fires per draft, summarize per closed thread.
   score_relationship_warmth: 1.4,
   summarize_thread_for_memory: 0.6,
   retrieve_relevant_memory: 0.8,
   infer_relationship_context: 0.4,
   summarize_recent_messages: 0.3,
+  // ── Three-pillar Folk repo ────────────────────────────────────
+  // META — every iMessage hits classify_message_intent; life events
+  // are extracted from a smaller subset of inbound msgs.
+  // LINKEDIN — Arlan's DM concierge. Quality classifier + template
+  // picker fire 1:1 per inbound DM; with 150/day per power user the
+  // hot-path bias is high.
+  // CUSTOMER SERVICE — every B2B SaaS ticket runs through priority
+  // classification; a small fraction need human escalation.
+  // FRONTIER residuals are honest about staying frontier; they get
+  // small scale because real production volume is also small.
+  classify_message_intent: 2.0,
+  classify_inbound_dm_quality: 2.4,
+  classify_support_ticket_priority: 1.8,
+  extract_event_from_message: 0.9,
+  pick_response_template: 2.4,
+  // frontier residuals — present in audit, explicitly rejected
+  extract_location_from_post: 1.0,
+  summarize_person_status: 0.7,
+  draft_personal_response_to_dm: 0.5,
+  resolve_complex_support_ticket: 0.4,
+  infer_company_context: 0.3,
 };
 
 function scaleFor(fnName: string): number {
@@ -186,10 +207,9 @@ const PRETTY_NAME: Record<string, string> = {
   rewrite_email_formal: "Formal Rewriter",
   draft_outreach_subject: "Outreach Subject",
   generate_marketing_copy: "Marketing Copy",
-  // Folk
-  classify_message_intent: "Message Intent",
+  // ── Folk — legacy messaging/memory pretty names (kept for any
+  // stragglers from older trace corpora) ───────────────────────
   score_message_urgency: "Reply Urgency",
-  extract_event_from_message: "Event Extractor",
   apply_user_writing_style: "Voice Rewriter",
   draft_reply_in_user_voice: "Reply Drafter",
   score_relationship_warmth: "Relationship Warmth",
@@ -197,6 +217,20 @@ const PRETTY_NAME: Record<string, string> = {
   retrieve_relevant_memory: "Memory Retriever",
   infer_relationship_context: "Relationship Context",
   summarize_recent_messages: "Recent Summary",
+  // ── META · Folk inbox ─────────────────────────────────────────
+  classify_message_intent: "Message Intent",
+  extract_event_from_message: "Life Event Extractor",
+  // ── LINKEDIN · DM concierge (Arlan workflow) ──────────────────
+  classify_inbound_dm_quality: "DM Quality",
+  pick_response_template: "Response Picker",
+  draft_personal_response_to_dm: "Personal Reply Drafter",
+  // ── CUSTOMER SERVICE · canonical generalizer ──────────────────
+  classify_support_ticket_priority: "Ticket Priority",
+  resolve_complex_support_ticket: "Complex Ticket Resolver",
+  // ── FRONTIER residuals shared across pillars ─────────────────
+  extract_location_from_post: "Post → Location",
+  summarize_person_status: "Person Summary",
+  infer_company_context: "Company Context",
 };
 
 function prettyName(fn: string): string {
@@ -208,24 +242,31 @@ function prettyName(fn: string): string {
 }
 
 function filePathFor(fn: string): string {
-  // Folk — memory layer (anthropic) vs messaging layer (openai)
-  if (
-    fn === "score_relationship_warmth" ||
-    fn === "summarize_thread_for_memory" ||
-    fn === "retrieve_relevant_memory" ||
-    fn === "infer_relationship_context" ||
-    fn === "summarize_recent_messages"
-  ) {
-    return "src/memory.ts";
-  }
+  // ── Three-pillar Folk repo ────────────────────────────────────
+  // META · Folk inbox (iMessage/Telegram/Discord agent).
   if (
     fn === "classify_message_intent" ||
-    fn === "score_message_urgency" ||
     fn === "extract_event_from_message" ||
-    fn === "apply_user_writing_style" ||
-    fn === "draft_reply_in_user_voice"
+    fn === "extract_location_from_post" ||
+    fn === "summarize_person_status"
   ) {
-    return "src/messaging.ts";
+    return "src/folk_inbox.ts";
+  }
+  // LINKEDIN · the Arlan DM concierge.
+  if (
+    fn === "classify_inbound_dm_quality" ||
+    fn === "pick_response_template" ||
+    fn === "draft_personal_response_to_dm"
+  ) {
+    return "src/dm_concierge.ts";
+  }
+  // CUSTOMER SERVICE · canonical SaaS support generalizer.
+  if (
+    fn === "classify_support_ticket_priority" ||
+    fn === "resolve_complex_support_ticket" ||
+    fn === "infer_company_context"
+  ) {
+    return "src/support.ts";
   }
   // Acme heuristic: lead/icp/extract/domain/research → src/icp.ts; rest → src/ops.ts
   if (
@@ -343,19 +384,58 @@ function clusterByInputPattern(
       { label: "with_company", test: (s) => /\bCompany\b/i.test(s) },
       { label: "single_word", test: (s) => /^[A-Z][a-zA-Z]+$/.test(s.trim()) },
     ],
-    // ── Folk fall-through clusters when categorical inference fails ─
-    extract_event_from_message: [
-      { label: "flight", test: (s) => /\bflight\b|\bSFO\b|\bJFK\b|\bairport\b/i.test(s) },
-      { label: "meeting", test: (s) => /\bmeeting\b|\bcall\b|\bsync\b|\bdemo\b/i.test(s) },
-      { label: "deadline", test: (s) => /\bdeadline\b|\bship\b|\bdue\b/i.test(s) },
-      { label: "booking", test: (s) => /\bdinner\b|\brestaurant\b|\bbooked\b|\btable\b/i.test(s) },
-      { label: "task", test: (s) => /\bship\b|\bpicture\b|\brecital\b|\bdoctor\b/i.test(s) },
-    ],
+    // ── Legacy Folk memory clusters (kept for backwards compat with
+    //    older trace corpora — newer three-pillar entries below
+    //    take precedence on key overlap) ────────────────────────────
     summarize_thread_for_memory: [
       { label: "logistics", test: (s) => /\b(meeting|call|dinner|book|flight|ship)\b/i.test(s) },
       { label: "emotional", test: (s) => /\b(love|miss|sorry|hurt|happy|sweetie)\b/i.test(s) },
       { label: "work_followup", test: (s) => /\b(bug|deploy|prod|review|PR|launch)\b/i.test(s) },
       { label: "casual", test: (s) => /\b(yo|sup|wassup|lol)\b/i.test(s) },
+    ],
+    // ── PILLAR 1 · META · Folk inbox ───────────────────────────────
+    classify_message_intent: [
+      { label: "logistics", test: (s) => /\b(meeting|call|dinner|lunch|coffee|tomorrow|tonight|book|flight|deadline|sign|review|move our)\b/i.test(s) },
+      { label: "emotional", test: (s) => /\b(love|miss|sorry|hate|hurt|happy|excited|birthday|anniversary|thinking)\b/i.test(s) },
+      { label: "question", test: (s) => /\?$|\bcan you\b|\bwhat\b|\bhow\b|\bwhen\b|\bwhere\b/i.test(s) },
+      { label: "greeting", test: (s) => /^\s*(hey|hi|hello|yo|sup|wassup|morning)\b/i.test(s) && s.length < 24 },
+      { label: "spam", test: (s) => /\b(buy|sale|free|click|http|claim)\b/i.test(s) },
+      { label: "task", test: () => true },
+    ],
+    extract_event_from_message: [
+      { label: "relocation", test: (s) => /\bmoving\b|\bmoved\b|\brelocat|\bbought a house\b|\bback home\b|\bleaving sf\b/i.test(s) },
+      { label: "new_job", test: (s) => /\bjoined\b|\bjoining\b|\bstarting at\b|\bnew role\b|\bpromoted\b|\bleft.*today\b|\bcofound/i.test(s) },
+      { label: "raised_funding", test: (s) => /\braised\b|\bseed round\b|\bseries [a-z]\b|\bacquired\b/i.test(s) },
+      { label: "got_married", test: (s) => /\bengaged\b|\bmarried\b|\bwedding\b|\bsaying yes\b/i.test(s) },
+      { label: "had_kid", test: (s) => /\bdad\b|\bbaby\b|\banother one\b|\bpaternity\b|\bkid\b/i.test(s) },
+      { label: "none", test: () => true },
+    ],
+    // ── PILLAR 2 · LINKEDIN · DM concierge ─────────────────────────
+    classify_inbound_dm_quality: [
+      { label: "spam", test: (s) => /\b(buy|crypto|airdrop|verified accounts|make \$\d|free|click here)\b/i.test(s) },
+      { label: "ai_slop", test: (s) => /\bhope you're doing well\b|\bcame across your\b|\bincredibly impressed\b|\bdeeply passionate\b|\bbig fan of\b/i.test(s) },
+      { label: "recruiter_blast", test: (s) => /\brecruiter\b|\bopen to new\b|\bopen roles\b|\bperfect match\b|\bhiring\b/i.test(s) },
+      { label: "vc_outreach", test: (s) => /\bvc\b|\binvest|\bpartner at\b|\braising\b|\bacquisition\b|\btier-1\b/i.test(s) },
+      { label: "friend", test: (s) => /\bdunk\b|\bmet you\b|\bsxsw\b|😂|\bllamaindex thread\b|\byo arlan\b/i.test(s) },
+      { label: "real_question", test: (s) => /\bquestion\b|\bbug\b|\bcrash|\b502\b|\bdocs say\b|\bissue\b|\bhow do you\b|\bbudget cap\b/i.test(s) },
+      { label: "generic_pitch", test: () => true },
+    ],
+    pick_response_template: [
+      { label: "auto_dismiss", test: (s) => /quality:\s*(spam|ai_slop)/i.test(s) && /ask:\s*(connection|any)/i.test(s) },
+      { label: "polite_decline_meeting", test: (s) => /quality:\s*ai_slop/i.test(s) && /ask:\s*(meeting|feedback)/i.test(s) },
+      { label: "polite_decline_recruiter", test: (s) => /quality:\s*recruiter_blast/i.test(s) },
+      { label: "polite_decline_advisor", test: (s) => /ask:\s*advisor_role/i.test(s) },
+      { label: "redirect_to_email", test: (s) => /quality:\s*(generic_pitch|vc_outreach)/i.test(s) && /ask:\s*(meeting|intro|partnership)/i.test(s) },
+      { label: "route_to_human", test: (s) => /quality:\s*(real_question|friend)/i.test(s) || /ask:\s*acquisition/i.test(s) },
+      { label: "ack_friend", test: (s) => /quality:\s*friend/i.test(s) && /ask:\s*greeting/i.test(s) },
+    ],
+    // ── PILLAR 3 · CUSTOMER SERVICE ───────────────────────────────
+    classify_support_ticket_priority: [
+      { label: "P0_outage", test: (s) => /\b(urgent|prod is down|critical|losing \$|asap|every api call|completely down)\b/i.test(s) },
+      { label: "P1_billing", test: (s) => /\b(charged twice|refund|payment|invoice|billing)\b/i.test(s) },
+      { label: "P2_bug", test: (s) => /\b(bug|crash|isn'?t (working|returning)|nothing happens)\b/i.test(s) },
+      { label: "P3_feature_request", test: (s) => /\b(feature request|would love|idea|could you add|please add|🥹)\b/i.test(s) },
+      { label: "P2_how_to", test: () => true },
     ],
   };
   const rules = RULES[fnName];
@@ -523,22 +603,13 @@ function inferInputFields(traces: ProxyTrace[], fnName: string): SyntheticInputF
     summarize_support_thread: [
       { name: "thread_text", kind: "text", reason: "full back-and-forth message log" },
     ],
-    // ── Folk ────────────────────────────────────────────────────────
-    classify_message_intent: [
-      { name: "text", kind: "text", reason: "raw inbound message body — wide variance" },
-      { name: "sender_id", kind: "string", reason: "contact identifier — drives tone prior" },
-      { name: "channel", kind: "enum", values: ["imessage", "telegram", "discord"], reason: "different channels carry different intent priors" },
-      { name: "thread_length", kind: "int", range: [0, 200], reason: "long threads bias toward logistics/task" },
-    ],
+    // ── Legacy Folk messaging/memory hints (kept for backwards compat
+    //    with older trace corpora — newer three-pillar entries below
+    //    take precedence on key overlap) ────────────────────────────
     score_message_urgency: [
       { name: "text", kind: "text", reason: "message body where urgency cues live" },
       { name: "sender_relationship", kind: "enum", values: ["family", "co_founder", "friend", "client", "investor", "stranger"], reason: "boss/family always-immediate; stranger always-later" },
       { name: "time_of_day", kind: "enum", values: ["morning", "workhours", "evening", "night"], reason: "off-hours msgs default to lower urgency" },
-    ],
-    extract_event_from_message: [
-      { name: "text", kind: "text", reason: "free-text where dates/times/locations live" },
-      { name: "user_timezone", kind: "string", reason: "needed to resolve relative times (\"tonight\")" },
-      { name: "today_iso", kind: "string", reason: "anchor for relative dates" },
     ],
     apply_user_writing_style: [
       { name: "draft", kind: "text", reason: "candidate reply, formal-baseline" },
@@ -569,6 +640,57 @@ function inferInputFields(traces: ProxyTrace[], fnName: string): SyntheticInputF
     ],
     summarize_recent_messages: [
       { name: "messages", kind: "text", reason: "last N messages across all threads" },
+    ],
+    // ── PILLAR 1 · META · Folk inbox ───────────────────────────────
+    classify_message_intent: [
+      { name: "text", kind: "text", reason: "raw inbound message body — wide variance" },
+      { name: "sender_id", kind: "string", reason: "contact identifier — drives tone prior" },
+      { name: "channel", kind: "enum", values: ["imessage", "telegram", "discord", "sms"], reason: "different channels carry different intent priors" },
+      { name: "thread_length", kind: "int", range: [0, 200], reason: "long threads bias toward logistics/task" },
+    ],
+    extract_event_from_message: [
+      { name: "text", kind: "text", reason: "free-text where life-event language lives" },
+      { name: "user_timezone", kind: "string", reason: "needed to resolve relative times (\"next month\")" },
+      { name: "today_iso", kind: "string", reason: "anchor for when_iso resolution" },
+    ],
+    // ── PILLAR 2 · LINKEDIN · DM concierge (Arlan workflow) ────────
+    classify_inbound_dm_quality: [
+      { name: "text", kind: "text", reason: "DM body — the dominant axis. AI-slop has very recognizable tells (\"hope you're doing well\", \"came across your work\")" },
+      { name: "sender_profile_summary", kind: "text", reason: "1-line summary of sender's LinkedIn (recruiter? founder? VC?) — strong prior" },
+      { name: "is_first_contact", kind: "bool", reason: "first-touch vs ongoing thread changes spam/real prior" },
+    ],
+    pick_response_template: [
+      { name: "quality", kind: "enum", values: ["spam", "ai_slop", "generic_pitch", "recruiter_blast", "vc_outreach", "real_question", "real_intro", "friend"], reason: "from upstream DM-quality classifier" },
+      { name: "ask", kind: "enum", values: ["connection", "meeting", "feedback", "advisor_role", "partnership", "role", "intro", "acquisition", "technical_help", "greeting", "any"], reason: "what the DM is actually asking for" },
+      { name: "user_tier", kind: "enum", values: ["free", "pro", "enterprise"], reason: "enterprise users get more aggressive auto-dismissal" },
+    ],
+    // ── PILLAR 3 · CUSTOMER SERVICE · generalizer ─────────────────
+    classify_support_ticket_priority: [
+      { name: "subject", kind: "text", reason: "free-text user subject line — the most variable field" },
+      { name: "body", kind: "text", reason: "ticket body, paraphrased across 18 templates" },
+      { name: "customer_tier", kind: "enum", values: ["free", "pro", "enterprise"], reason: "drives priority bias: enterprise outages always P0" },
+      { name: "has_outage_keywords", kind: "bool", reason: "regex prior on outage/down/timeout keyword set" },
+    ],
+    // ── FRONTIER residuals (audit explicitly REJECTS) ─────────────
+    extract_location_from_post: [
+      { name: "caption", kind: "text", reason: "post caption — partial signal" },
+      { name: "image_bytes", kind: "string", reason: "REJECT axis: vision input · synthesizer cannot fake image distribution" },
+      { name: "geotag", kind: "string", reason: "raw geotag (often missing)" },
+    ],
+    summarize_person_status: [
+      { name: "signals", kind: "text", reason: "aggregated person-status JSON blob" },
+      { name: "user_relationship", kind: "string", reason: "REJECT axis: output is creative paragraph · no template collapse possible" },
+    ],
+    draft_personal_response_to_dm: [
+      { name: "inbound_dm", kind: "text", reason: "the message Arlan is replying to" },
+      { name: "thread_history", kind: "text", reason: "REJECT axis: response must be personalized to sender — creative output" },
+    ],
+    resolve_complex_support_ticket: [
+      { name: "ticket_text", kind: "text", reason: "ticket body" },
+      { name: "log_excerpts", kind: "text", reason: "REJECT axis: free-form reasoning over heterogeneous evidence" },
+    ],
+    infer_company_context: [
+      { name: "signals", kind: "text", reason: "REJECT axis: open-ended generative inference · no bounded schema" },
     ],
   };
   if (PER_WF[fnName]) return PER_WF[fnName]!;
@@ -621,20 +743,15 @@ function inferStrategies(traces: ProxyTrace[], fnName: string): SyntheticCallStr
       { name: "OCR noise injection", rationale: "Realistic OCR errors (0/O, 1/l, broken whitespace)", share: 0.2 },
       { name: "negative line items", rationale: "Refund/credit memos that look like invoices", share: 0.15 },
     ],
-    // ── Folk ────────────────────────────────────────────────────────
-    classify_message_intent: [
-      { name: "intent template paraphrase", rationale: "16 archetypal inbound patterns × 6 paraphrases each = 96 variants", share: 0.4 },
-      { name: "channel × intent permutation", rationale: "Same intent phrased in iMessage vs Telegram vs Discord style", share: 0.25 },
-      { name: "spam adversarial", rationale: "Promo/phishing patterns to harden the spam branch", share: 0.2 },
-      { name: "doc-grounded ICP variants", rationale: "Pulls real-shaped messages from icp.md persona examples", share: 0.15 },
-    ],
+    // ── Legacy Folk strategies (kept for backwards compat — newer
+    //    three-pillar entries below take precedence on key overlap)
     score_message_urgency: [
       { name: "sender × intent grid", rationale: "6 sender types × 5 urgency lexical patterns = 30 cells", share: 0.4 },
       { name: "time-of-day permutation", rationale: "Same message at 9am vs 11pm shifts urgency", share: 0.25 },
       { name: "deadline language fuzz", rationale: "EOD / EOW / asap / tonight / tomorrow paraphrases", share: 0.2 },
       { name: "negative-vault carve-outs", rationale: "Spam-classified messages route to never branch", share: 0.15 },
     ],
-    extract_event_from_message: [
+    legacy_unused_extract_event_from_message: [
       { name: "event-type template grid", rationale: "5 event types × 8 phrasings each = 40 anchors", share: 0.35 },
       { name: "relative date fuzz", rationale: "tomorrow/tonight/next-thursday/in-a-week resolution edge cases", share: 0.3 },
       { name: "no-event negative", rationale: "Casual messages with no event — must return event_type=none", share: 0.2 },
@@ -656,6 +773,38 @@ function inferStrategies(traces: ProxyTrace[], fnName: string): SyntheticCallStr
       { name: "topic diversity", rationale: "Single-topic vs multi-topic threads", share: 0.3 },
       { name: "sentiment swings", rationale: "Threads that flip sentiment mid-conversation", share: 0.2 },
       { name: "open-loop detection", rationale: "Threads that end with an unanswered question", share: 0.1 },
+    ],
+    // ── PILLAR 1 · META · Folk inbox ───────────────────────────────
+    classify_message_intent: [
+      { name: "intent template paraphrase", rationale: "16 archetypal inbound patterns × 6 paraphrases each = 96 variants", share: 0.4 },
+      { name: "channel × intent permutation", rationale: "Same intent phrased iMessage vs Telegram vs Discord style", share: 0.25 },
+      { name: "spam adversarial", rationale: "Promo / phishing patterns to harden the spam branch", share: 0.2 },
+      { name: "doc-grounded ICP messages", rationale: "Pulls real-shaped messages from icp.md persona examples", share: 0.15 },
+    ],
+    extract_event_from_message: [
+      { name: "event-type template grid", rationale: "6 life-event archetypes × 8 phrasings each = 48 anchor inputs", share: 0.4 },
+      { name: "relative date fuzz", rationale: "\"next month\", \"in march\", \"last weekend\" date resolution edge cases", share: 0.25 },
+      { name: "no-event negative", rationale: "Casual messages with no event — must return event_type=none", share: 0.2 },
+      { name: "ambiguous-event adversarial", rationale: "\"new role\" could be promotion vs job change — checks bucket boundaries", share: 0.15 },
+    ],
+    // ── PILLAR 2 · LINKEDIN · DM concierge (Arlan workflow) ────────
+    classify_inbound_dm_quality: [
+      { name: "100k DM template fan-out", rationale: "8 quality archetypes × 12 lexical variants × 8 sender personas = 768 anchor cells; each fanned into ~130 paraphrases for the full 100k corpus", share: 0.45 },
+      { name: "ai-slop signature mining", rationale: "AI-slop DMs have characteristic phrases (\"hope you're doing well\", \"came across your work\", \"deeply passionate\") — adversarial coverage of the next-gen slop variants", share: 0.2 },
+      { name: "real-question carve-out", rationale: "Genuine technical questions about OpenClaw must NEVER be auto-dismissed — adversarial set hardens this boundary", share: 0.2 },
+      { name: "doc-grounded sender corpus", rationale: "Real LinkedIn-shaped templates pulled from public cold-outreach guides + observed inbound", share: 0.15 },
+    ],
+    pick_response_template: [
+      { name: "quality × ask matrix", rationale: "8 qualities × 11 asks × 3 user_tiers = 264 cells, each one a deterministic template lookup", share: 0.55 },
+      { name: "boundary-case calibration", rationale: "Edge cells where quality and ask disagree (e.g. real_question + meeting → human queue, NOT auto-decline)", share: 0.25 },
+      { name: "doc-grounded canned responses", rationale: "Pulls Arlan's actual response templates from `responses.md` corpus", share: 0.2 },
+    ],
+    // ── PILLAR 3 · CUSTOMER SERVICE · generalizer ─────────────────
+    classify_support_ticket_priority: [
+      { name: "paraphrase template", rationale: "Each subject template paraphrased ×6", share: 0.35 },
+      { name: "permute customer_tier × keyword", rationale: "Cross customer_tier × outage keyword", share: 0.3 },
+      { name: "fuzz body adversarial", rationale: "Inject jargon, typos, emoji to test fragility", share: 0.2 },
+      { name: "doc-grounded ICP variants", rationale: "Pulls customer-tier hints from icp.md + pricing.md", share: 0.15 },
     ],
   };
   if (PER_WF[fnName]) return PER_WF[fnName]!;
