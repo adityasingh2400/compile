@@ -5079,3 +5079,810 @@ button {
   color: rgba(232, 234, 238, 0.78);
 }
 
+
+/* ──────────────────────────────────────────────────────────────────
+   CODIFICATION PAGE — status-feed redesign (replaces code editors)
+   ────────────────────────────────────────────────────────────────── */
+
+.cf-router-track {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px 14px;
+  flex-wrap: wrap;
+}
+
+.cf-router-seg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--dim);
+  border-radius: 999px;
+  background: rgba(15, 18, 24, 0.6);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  animation: cf-seg-in 320ms ease backwards;
+  transition: border-color 280ms ease, color 280ms ease, background 280ms ease;
+}
+
+.cf-router-seg.sealed {
+  border-color: rgba(90, 252, 167, 0.4);
+  color: var(--green);
+  background: rgba(90, 252, 167, 0.06);
+}
+
+.cf-router-seg.tier2.sealed {
+  border-color: rgba(255, 179, 90, 0.4);
+  color: var(--amber);
+  background: rgba(255, 179, 90, 0.06);
+}
+
+.cf-router-seg .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.cf-router-seg .lbl {
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.cf-router-seg .state {
+  font-size: 11px;
+  color: inherit;
+}
+
+@keyframes cf-seg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Agent status panels — replace the code editors */
+.cf-agent {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dim);
+  border-radius: 8px;
+  background: rgba(10, 12, 17, 0.85);
+  overflow: hidden;
+  font-family: var(--mono);
+  transition: all 320ms ease;
+  animation: cf-agent-in 600ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  min-height: 0;
+}
+
+.cf-agent.tier1.beat-analyzing,
+.cf-agent.tier1.beat-synthesizing {
+  border-color: rgba(122, 223, 255, 0.5);
+  box-shadow: 0 0 24px -4px rgba(122, 223, 255, 0.35);
+}
+
+.cf-agent.tier1.beat-validating {
+  border-color: rgba(180, 141, 255, 0.5);
+  box-shadow: 0 0 24px -4px rgba(180, 141, 255, 0.35);
+}
+
+.cf-agent.tier1.beat-committing {
+  border-color: rgba(90, 252, 167, 0.55);
+  box-shadow: 0 0 30px -4px rgba(90, 252, 167, 0.45);
+}
+
+.cf-agent.tier2.beat-analyzing,
+.cf-agent.tier2.beat-synthesizing {
+  border-color: rgba(255, 179, 90, 0.5);
+  box-shadow: 0 0 24px -4px rgba(255, 179, 90, 0.35);
+}
+
+.cf-agent.tier2.beat-committing {
+  border-color: rgba(90, 252, 167, 0.55);
+  box-shadow: 0 0 30px -4px rgba(90, 252, 167, 0.45);
+}
+
+.cf-agent.committed {
+  border-color: rgba(90, 252, 167, 0.55);
+  background: rgba(12, 22, 16, 0.85);
+  box-shadow: 0 0 24px -6px rgba(90, 252, 167, 0.4);
+}
+
+.cf-agent.tier2.committed {
+  border-color: rgba(255, 179, 90, 0.45);
+  background: rgba(28, 22, 14, 0.85);
+}
+
+.cf-agent-head {
+  display: grid;
+  grid-template-columns: 8px auto auto auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dim);
+  background: rgba(15, 18, 24, 0.6);
+  font-size: 11px;
+}
+
+.cf-agent-head .ag-savings {
+  color: var(--cyan);
+  text-align: right;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.cf-agent-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  min-height: 0;
+}
+
+.cf-agent-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cf-agent-status .glyph {
+  font-size: 16px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cyan);
+  transition: color 220ms ease;
+}
+
+.cf-agent-status .glyph.beat-queued { color: var(--muted); }
+.cf-agent-status .glyph.beat-analyzing,
+.cf-agent-status .glyph.beat-synthesizing { color: var(--cyan); }
+.cf-agent-status .glyph.beat-validating { color: var(--violet); }
+.cf-agent-status .glyph.beat-committing { color: var(--green); }
+.cf-agent-status .glyph.beat-committed { color: var(--green); }
+
+.cf-agent-status .glyph.beat-analyzing,
+.cf-agent-status .glyph.beat-synthesizing,
+.cf-agent-status .glyph.beat-validating,
+.cf-agent-status .glyph.beat-committing {
+  animation: cf-glyph-spin 1.6s linear infinite;
+}
+
+@keyframes cf-glyph-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.cf-agent-status .lbl {
+  flex: 1;
+  color: var(--fg);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+.cf-agent-status .pct {
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cf-agent.committed .cf-agent-status .pct,
+.cf-agent.committed .cf-agent-status .lbl {
+  color: var(--green);
+}
+
+.cf-agent-progress {
+  height: 3px;
+  background: rgba(122, 223, 255, 0.07);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.cf-agent-progress .bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 280ms ease;
+  background: linear-gradient(to right, var(--cyan), rgba(122, 223, 255, 0.6));
+}
+
+.cf-agent-progress .bar.beat-validating {
+  background: linear-gradient(to right, var(--violet), rgba(180, 141, 255, 0.6));
+}
+
+.cf-agent-progress .bar.beat-committing,
+.cf-agent-progress .bar.beat-committed {
+  background: linear-gradient(to right, var(--green), rgba(90, 252, 167, 0.6));
+}
+
+.cf-agent.tier2 .cf-agent-progress .bar {
+  background: linear-gradient(to right, var(--amber), rgba(255, 179, 90, 0.6));
+}
+
+.cf-agent.tier2 .cf-agent-progress .bar.beat-committed {
+  background: linear-gradient(to right, var(--green), rgba(90, 252, 167, 0.6));
+}
+
+.cf-agent-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.cf-agent-trace .trace-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  transition: color 220ms ease;
+}
+
+.cf-agent-trace .trace-row .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dim);
+  flex-shrink: 0;
+  transition: background 220ms ease, box-shadow 220ms ease;
+}
+
+.cf-agent-trace .trace-row.done {
+  color: var(--green);
+}
+.cf-agent-trace .trace-row.done .dot {
+  background: var(--green);
+}
+
+.cf-agent-trace .trace-row.current {
+  color: var(--fg);
+}
+.cf-agent-trace .trace-row.current .dot {
+  background: var(--cyan);
+  box-shadow: 0 0 8px rgba(122, 223, 255, 0.7);
+  animation: cf-trace-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cf-trace-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(122, 223, 255, 0.7); }
+  50%      { box-shadow: 0 0 14px rgba(122, 223, 255, 0.95); }
+}
+
+.cf-agent-trace .trace-row .lbl {
+  flex: 1;
+}
+
+.cf-agent-trace .trace-row .check {
+  color: var(--green);
+  font-size: 11px;
+}
+
+.cf-agent-trace .trace-row .active-tag {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid rgba(122, 223, 255, 0.4);
+  background: rgba(122, 223, 255, 0.08);
+}
+
+.cf-agent-spec {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px dashed var(--dim);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cf-agent-spec .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10.5px;
+  font-family: var(--mono);
+}
+
+.cf-agent-spec .key {
+  color: var(--dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 9.5px;
+}
+
+.cf-agent-spec .val {
+  color: var(--fg);
+  font-size: 10.5px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Vault spotlight effect */
+.cf-vault-spotlights {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(90, 252, 167, 0.18), transparent 50%),
+    radial-gradient(circle at 70% 80%, rgba(122, 223, 255, 0.12), transparent 55%);
+  pointer-events: none;
+  animation: cf-vault-shimmer 5s ease-in-out infinite;
+}
+
+@keyframes cf-vault-shimmer {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
+
+
+/* ──────────────────────────────────────────────────────────────────
+   AUDIT — shared chrome additions
+   ────────────────────────────────────────────────────────────────── */
+
+.audit-top {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.audit-live-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.audit-live-stats .stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 26px;
+}
+
+.audit-live-stats .big {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--fg);
+  line-height: 1.05;
+}
+
+.audit-live-stats .stat.green .big { color: var(--green); }
+.audit-live-stats .stat.amber .big { color: var(--amber); }
+.audit-live-stats .stat.red .big { color: var(--red); }
+
+.audit-live-stats .lbl {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.audit-live-stats .sep {
+  color: var(--dim);
+}
+
+.audit-stage-tag {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  background: rgba(122, 223, 255, 0.06);
+}
+
+.audit-stage-tag.boot,
+.audit-stage-tag.scanning {
+  color: var(--cyan);
+  border-color: rgba(122, 223, 255, 0.4);
+}
+
+.audit-stage-tag.classifying {
+  color: var(--amber);
+  border-color: rgba(255, 179, 90, 0.4);
+}
+
+.audit-stage-tag.filtering,
+.audit-stage-tag.manifest,
+.audit-stage-tag.transition {
+  color: var(--green);
+  border-color: rgba(90, 252, 167, 0.45);
+  background: rgba(90, 252, 167, 0.06);
+}
+
+
+/* ──────────────────────────────────────────────────────────────────
+   CODIFICATION PAGE — layout wrappers (cf-page · cf-router · cf-body
+   · cf-agent-grid · cf-vault). The `.cf-agent` body styles already
+   exist above; this block adds the missing structural rules.
+   ────────────────────────────────────────────────────────────────── */
+
+.cf-page {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
+  padding: 14px 24px 18px;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(122, 223, 255, 0.04), transparent 60%),
+    var(--bg);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cf-router {
+  border: 1px solid var(--dim);
+  border-radius: 8px;
+  background: rgba(8, 10, 14, 0.85);
+  overflow: hidden;
+  transition: border-color 380ms ease, box-shadow 380ms ease;
+  flex-shrink: 0;
+}
+
+.cf-router.complete {
+  border-color: rgba(90, 252, 167, 0.45);
+  box-shadow: 0 0 32px -8px rgba(90, 252, 167, 0.4);
+}
+
+.cf-router-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--dim);
+  background: rgba(15, 18, 24, 0.6);
+  font-family: var(--mono);
+}
+
+.cf-router-head .num {
+  color: var(--green);
+  font-size: 14px;
+  text-shadow: 0 0 8px rgba(90, 252, 167, 0.5);
+}
+
+.cf-router-head .title {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cf-router-head .hint {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.cf-router-head .status {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  border: 1px solid;
+  font-weight: 500;
+}
+
+.cf-router-head .status.live {
+  color: var(--cyan);
+  border-color: rgba(122, 223, 255, 0.4);
+  background: rgba(122, 223, 255, 0.07);
+}
+
+.cf-router-head .status.complete {
+  color: var(--green);
+  border-color: rgba(90, 252, 167, 0.45);
+  background: rgba(90, 252, 167, 0.08);
+}
+
+/* Body grid: agents (1fr) + neo vault (right rail) */
+.cf-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 14px;
+  min-height: 0;
+}
+
+.cf-agent-grid {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Vault */
+.cf-vault {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(90, 252, 167, 0.32);
+  border-radius: 8px;
+  background: rgba(8, 14, 12, 0.85);
+  overflow: hidden;
+  box-shadow: inset 0 0 60px rgba(90, 252, 167, 0.04);
+  transition: border-color 380ms ease, box-shadow 380ms ease;
+  min-height: 0;
+}
+
+.cf-vault.sealed {
+  border-color: rgba(90, 252, 167, 0.65);
+  box-shadow:
+    0 0 38px -6px rgba(90, 252, 167, 0.55),
+    inset 0 0 80px rgba(90, 252, 167, 0.1);
+}
+
+.cf-vault-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--dim);
+  background: rgba(15, 22, 18, 0.85);
+  font-family: var(--mono);
+  flex-shrink: 0;
+}
+
+.cf-vault-head .vmark {
+  color: var(--green);
+  font-size: 16px;
+  text-shadow: 0 0 10px rgba(90, 252, 167, 0.7);
+}
+
+.cf-vault-head .title {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cf-vault-head .hint {
+  color: var(--green);
+  font-size: 11px;
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.cf-vault-body {
+  flex: 1;
+  position: relative;
+  padding: 14px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cf-vault-frame {
+  position: relative;
+  height: 100%;
+  border: 1px solid rgba(90, 252, 167, 0.2);
+  border-radius: 6px;
+  background:
+    linear-gradient(to bottom, rgba(90, 252, 167, 0.05), transparent 30%),
+    rgba(5, 8, 6, 0.55);
+  padding: 12px;
+  overflow: hidden;
+}
+
+.cf-vault-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(90, 252, 167, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 252, 167, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+  pointer-events: none;
+}
+
+.cf-vault-entries {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  overflow-y: auto;
+  z-index: 1;
+}
+
+.cf-vault-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 30px 10px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  min-height: 100px;
+}
+
+.cf-vault-empty .dim {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.cf-vault-entry {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 30px 80px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(90, 252, 167, 0.3);
+  background: rgba(20, 32, 26, 0.72);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  animation: cf-vault-slide-in 540ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+.cf-vault-entry.tier2 {
+  border-color: rgba(255, 179, 90, 0.3);
+  background: rgba(36, 30, 20, 0.7);
+}
+
+@keyframes cf-vault-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.96);
+    box-shadow: 0 0 28px rgba(90, 252, 167, 0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0px rgba(90, 252, 167, 0);
+  }
+}
+
+.cf-vault-entry .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.cf-vault-entry .key {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+}
+
+.cf-vault-entry .tier {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+.cf-vault-entry .tier.tier1 { color: var(--green); }
+.cf-vault-entry .tier.tier2 { color: var(--amber); }
+
+.cf-vault-entry .savings {
+  color: var(--green);
+  text-align: right;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.cf-vault-entry.tier2 .savings {
+  color: var(--amber);
+}
+
+.cf-vault-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--dim);
+  background: rgba(15, 22, 18, 0.7);
+  flex-shrink: 0;
+}
+
+.cf-vault-foot .meter {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cf-vault-foot .big {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.cf-vault-foot .meter.green .big {
+  color: var(--green);
+  text-shadow: 0 0 10px rgba(90, 252, 167, 0.4);
+}
+
+.cf-vault-foot .lbl {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+/* Fly overlay */
+.cf-fly-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.cf-fly-particle {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  animation: cf-fly 1300ms cubic-bezier(0.5, 0.05, 0.2, 1) forwards;
+  --color: rgba(90, 252, 167, 0.95);
+  left: var(--from-x);
+  top: var(--from-y);
+}
+
+.cf-fly-particle .fly-bubble {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--color);
+  box-shadow: 0 0 24px var(--color);
+}
+
+.cf-fly-particle .fly-label {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color);
+  background: rgba(8, 10, 14, 0.85);
+  color: var(--color);
+}
+
+@keyframes cf-fly {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform:
+      translate(
+        calc(var(--to-x) - var(--from-x)),
+        calc(var(--to-y) - var(--from-y))
+      )
+      scale(0.4);
+  }
+}
+

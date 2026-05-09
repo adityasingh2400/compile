@@ -494,6 +494,7 @@ export function AuditStage(): JSX.Element {
             <span className="dim">/ audit</span>
           </div>
           <div className="audit-title">{title}</div>
+          <AuditLiveStats />
         </div>
         <div className="audit-grid">
           <BootTerminal />
@@ -503,6 +504,45 @@ export function AuditStage(): JSX.Element {
         <PhaseIndicator />
         <ManifestOverlay />
       </div>
+    </div>
+  );
+}
+
+function AuditLiveStats(): JSX.Element {
+  const phase = useRedesignStore((s) => s.audit.phase);
+  const filesScanned = useRedesignStore((s) => s.audit.files_scanned);
+  const classified = useRedesignStore((s) => s.audit.classified);
+  const t1 = classified.filter((c) => c.outcome === "tier_1").length;
+  const t2 = classified.filter((c) => c.outcome === "tier_2").length;
+  const neg = classified.filter((c) => c.outcome === "negative").length;
+  return (
+    <div className="audit-live-stats">
+      <div className="stat">
+        <span className="big">{filesScanned}</span>
+        <span className="lbl">files</span>
+      </div>
+      <span className="sep">·</span>
+      <div className="stat">
+        <span className="big">{classified.length}</span>
+        <span className="lbl">sites</span>
+      </div>
+      <span className="sep">·</span>
+      <div className="stat green">
+        <span className="big">{t1}</span>
+        <span className="lbl">T1</span>
+      </div>
+      <span className="sep">·</span>
+      <div className="stat amber">
+        <span className="big">{t2}</span>
+        <span className="lbl">T2</span>
+      </div>
+      <span className="sep">·</span>
+      <div className="stat red">
+        <span className="big">{neg}</span>
+        <span className="lbl">neg</span>
+      </div>
+      <span className="sep">·</span>
+      <span className={`audit-stage-tag ${phase}`}>{phase}</span>
     </div>
   );
 }
