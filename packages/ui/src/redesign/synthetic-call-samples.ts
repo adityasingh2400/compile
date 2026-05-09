@@ -89,153 +89,187 @@ interface SamplePack {
 }
 
 const PACKS: { match: (fn: string) => boolean; pack: SamplePack }[] = [
-  // ─────────────────────────────────────────────────────────────────
-  // extract_location_from_post — caption → {city, country, neighborhood}
+  // ═════════════════════════════════════════════════════════════════
+  // PILLAR 2 · LINKEDIN · DM concierge — THE ARLAN WORKFLOW
+  //
+  // 100k synthetic LinkedIn DMs collapse into 7 quality buckets.
+  // Each bucket is instantly recognizable as "yeah, that's exactly
+  // the garbage I get every day."
+  // ═════════════════════════════════════════════════════════════════
   {
-    match: (fn) => /extract.*location|location.*extract|location.*post/i.test(fn),
+    match: (fn) => /classify.*inbound.*dm|inbound.*dm.*quality|dm.*quality/i.test(fn),
     pack: {
       clusters: [
-        { slug: "us_cities", label: "US · NYC / SF / LA / Austin" },
-        { slug: "asia_pacific", label: "asia · tokyo / shanghai / seoul" },
-        { slug: "europe", label: "europe · berlin / london / paris" },
-        { slug: "in_transit", label: "in transit · airports / flights" },
-        { slug: "throwback_stale", label: "throwback · stale signal" },
+        { slug: "ai_slop", label: "ai-slop · auto-dismiss" },
+        { slug: "generic_pitch", label: "generic founder pitch" },
+        { slug: "recruiter_blast", label: "recruiter blast" },
+        { slug: "vc_outreach", label: "vc outreach" },
+        { slug: "spam", label: "spam · drop" },
+        { slug: "real_question", label: "real question · → human" },
+        { slug: "friend", label: "friend · → human" },
       ],
       samples: [
-        { label: "back in NYC for the week, hmu", cluster: "us_cities" },
-        { label: "first day at the new office in soma", cluster: "us_cities" },
-        { label: "live from SXSW panel — link in bio", cluster: "us_cities" },
-        { label: "miami till sunday, who's around?", cluster: "us_cities" },
-        { label: "sunset at venice beach 🌅", cluster: "us_cities" },
-        { label: "vibing in tokyo 🇯🇵 ramen for breakfast", cluster: "asia_pacific" },
-        { label: "writing this from a coffee shop in shibuya", cluster: "asia_pacific" },
-        { label: "shanghai office — first time in 2 years", cluster: "asia_pacific" },
-        { label: "berlin → amsterdam → paris in 5 days", cluster: "europe" },
-        { label: "lisbon for the conference this week", cluster: "europe" },
-        { label: "just landed at SFO, finally", cluster: "in_transit" },
-        { label: "currently at LAX waiting for the redeye", cluster: "in_transit" },
-        { label: "driving up the PCH from LA → SF", cluster: "in_transit" },
-        { label: "throwback to last summer in lisbon ☀️", cluster: "throwback_stale" },
-        { label: "miss this place — taken in 2023", cluster: "throwback_stale" },
+        { label: "\"Hi Arlan, hope you're doing well…\"", cluster: "ai_slop" },
+        { label: "\"came across your work, incredibly impressed\"", cluster: "ai_slop" },
+        { label: "\"deeply passionate about agentic AI\"", cluster: "ai_slop" },
+        { label: "\"big fan of OpenClaw, would love to connect\"", cluster: "ai_slop" },
+        { label: "\"series A founder, 15 min next week?\"", cluster: "generic_pitch" },
+        { label: "\"we just shipped v2, would love your take\"", cluster: "generic_pitch" },
+        { label: "\"perfect partnership opportunity, 30 min?\"", cluster: "generic_pitch" },
+        { label: "\"recruiter at Stripe, Staff Eng role\"", cluster: "recruiter_blast" },
+        { label: "\"are you open to new opportunities?\"", cluster: "recruiter_blast" },
+        { label: "\"$400-600k base + equity, interested?\"", cluster: "recruiter_blast" },
+        { label: "\"Tier-1 VC, are you raising?\"", cluster: "vc_outreach" },
+        { label: "\"investing in agents, swap notes?\"", cluster: "vc_outreach" },
+        { label: "\"acquisition opportunity confidentially\"", cluster: "vc_outreach" },
+        { label: "\"BUY VERIFIED LINKEDIN ACCOUNTS\"", cluster: "spam" },
+        { label: "\"FREE crypto airdrop ⬇️\"", cluster: "spam" },
+        { label: "\"how do you scope credentials per-tool?\"", cluster: "real_question" },
+        { label: "\"OpenClaw crashed when spawning 3 sandboxes\"", cluster: "real_question" },
+        { label: "\"budget cap overflows by ~12%, bug?\"", cluster: "real_question" },
+        { label: "\"yo arlan, the llamaindex dunk 😂\"", cluster: "friend" },
+        { label: "\"met you at SXSW, follow up?\"", cluster: "friend" },
       ],
     },
   },
 
   // ─────────────────────────────────────────────────────────────────
-  // extract_activity_from_post — caption → {activity, category}
+  // pick_response_template — (quality × ask) → canned response
+  // The "Folk is paying frontier rates to evaluate a switch
+  // statement" punchline. 8 response templates total.
   {
-    match: (fn) => /extract.*activity|activity.*extract|activity.*post/i.test(fn),
+    match: (fn) => /pick.*response.*template|response.*template|template.*pick/i.test(fn),
     pack: {
       clusters: [
-        { slug: "shipping", label: "shipping · launching" },
-        { slug: "speaking", label: "speaking · panels" },
-        { slug: "career_move", label: "career move · interviews" },
-        { slug: "fundraising", label: "fundraising · investor mode" },
-        { slug: "personal_milestone", label: "personal milestone" },
-        { slug: "training", label: "training · race prep" },
+        { slug: "auto_dismiss", label: "auto_dismiss · archive · no reply" },
+        { slug: "polite_decline_meeting", label: "decline_meeting · auto-send" },
+        { slug: "polite_decline_recruiter", label: "decline_recruiter · auto-send" },
+        { slug: "polite_decline_advisor", label: "decline_advisor · auto-send" },
+        { slug: "redirect_to_email", label: "redirect_to_email · auto-send" },
+        { slug: "route_to_human", label: "route_to_human · queue for Arlan" },
+        { slug: "ack_friend", label: "ack_friend · 👍 reaction" },
       ],
       samples: [
-        { label: "shipping the v3 release tonight 🚀", cluster: "shipping" },
-        { label: "running point on the launch thursday", cluster: "shipping" },
-        { label: "demoing at YC on tuesday", cluster: "shipping" },
-        { label: "panel on AI safety in 30 min", cluster: "speaking" },
-        { label: "speaking at recsys next week", cluster: "speaking" },
-        { label: "first day teaching CS61A this semester", cluster: "speaking" },
-        { label: "interviewing for a new role this week", cluster: "career_move" },
-        { label: "took the cofounder job at a stealth startup", cluster: "career_move" },
-        { label: "left bigco, working on something with friends", cluster: "career_move" },
-        { label: "raising for our seed round — open to intros", cluster: "fundraising" },
-        { label: "pitched 6 funds today, brain is fried", cluster: "fundraising" },
-        { label: "married last weekend ❤️", cluster: "personal_milestone" },
-        { label: "officially a dad 🎉", cluster: "personal_milestone" },
-        { label: "moved to a new apartment, deep in unboxing hell", cluster: "personal_milestone" },
-        { label: "training for IM Kona in october", cluster: "training" },
-        { label: "running boston marathon this morning", cluster: "training" },
+        { label: "ai_slop + connection", cluster: "auto_dismiss" },
+        { label: "spam + any", cluster: "auto_dismiss" },
+        { label: "recruiter + connection", cluster: "auto_dismiss" },
+        { label: "ai_slop + meeting → \"thanks but not taking unsolicited mtgs\"", cluster: "polite_decline_meeting" },
+        { label: "ai_slop + feedback → \"appreciate it, can't help right now\"", cluster: "polite_decline_meeting" },
+        { label: "recruiter + role → \"not looking, thanks\"", cluster: "polite_decline_recruiter" },
+        { label: "ai_slop + advisor_role → \"not taking new advisory roles\"", cluster: "polite_decline_advisor" },
+        { label: "generic_pitch + meeting → \"send a 1-pager to arlan@…\"", cluster: "redirect_to_email" },
+        { label: "vc + intro → \"intros via arlan@…\"", cluster: "redirect_to_email" },
+        { label: "real_question + technical_help", cluster: "route_to_human" },
+        { label: "vc + acquisition", cluster: "route_to_human" },
+        { label: "friend + meeting", cluster: "route_to_human" },
+        { label: "friend + greeting → 👍", cluster: "ack_friend" },
+      ],
+    },
+  },
+
+  // ═════════════════════════════════════════════════════════════════
+  // PILLAR 1 · META · Folk inbox — message intent classifier
+  // ═════════════════════════════════════════════════════════════════
+  {
+    match: (fn) => /classify.*message.*intent|message.*intent.*class/i.test(fn),
+    pack: {
+      clusters: [
+        { slug: "scheduling", label: "logistics · scheduling" },
+        { slug: "urgent", label: "task · urgent" },
+        { slug: "warmth", label: "emotional · warmth" },
+        { slug: "logistics", label: "logistics · checkin" },
+        { slug: "noise", label: "noise · spam" },
+        { slug: "greeting", label: "greeting · low signal" },
+      ],
+      samples: [
+        { label: "lunch tuesday at noon", cluster: "scheduling" },
+        { label: "can we move our 3pm to 4pm?", cluster: "scheduling" },
+        { label: "anniversary dinner saturday", cluster: "scheduling" },
+        { label: "booked the restaurant for tomorrow", cluster: "scheduling" },
+        { label: "team standup tomorrow 10am", cluster: "scheduling" },
+        { label: "client: prod is on fire RIGHT NOW", cluster: "urgent" },
+        { label: "boss: need this by EOD please", cluster: "urgent" },
+        { label: "deadline for the proposal is friday", cluster: "urgent" },
+        { label: "happy birthday!!", cluster: "warmth" },
+        { label: "love you", cluster: "warmth" },
+        { label: "thinking of you", cluster: "warmth" },
+        { label: "mom: how was your day", cluster: "warmth" },
+        { label: "running 5 mins late", cluster: "logistics" },
+        { label: "on my way, ETA 10", cluster: "logistics" },
+        { label: "got the package, thanks", cluster: "logistics" },
+        { label: "FREE iPhone — click here", cluster: "noise" },
+        { label: "claim your reward now", cluster: "noise" },
+        { label: "yo", cluster: "greeting" },
+        { label: "hey, free this weekend?", cluster: "greeting" },
       ],
     },
   },
 
   // ─────────────────────────────────────────────────────────────────
-  // classify_post_recency — posted_at + caption → {fresh|recent|stale}
+  // extract_event_from_message — text → 6-way life-event enum
   {
-    match: (fn) => /post.*recency|recency.*post|post.*fresh|stale/i.test(fn),
+    match: (fn) => /extract.*event.*message|event.*extract.*message|life.*event/i.test(fn),
     pack: {
       clusters: [
-        { slug: "live", label: "live · <12h old" },
-        { slug: "recent", label: "recent · <72h" },
-        { slug: "this_month", label: "this month" },
-        { slug: "stale_throwback", label: "stale · throwback · drop" },
+        { slug: "relocation", label: "relocation · move" },
+        { slug: "new_job", label: "new job · promo · cofound" },
+        { slug: "raised_funding", label: "raised funding · acquired" },
+        { slug: "got_married", label: "engaged · married" },
+        { slug: "had_kid", label: "had kid · new parent" },
+        { slug: "none", label: "no event · skip" },
       ],
       samples: [
-        { label: "posted 3hrs ago · \"on stage at SXSW\"", cluster: "live" },
-        { label: "posted 1hr ago · \"keynote in 20 min\"", cluster: "live" },
-        { label: "posted 8hrs ago · \"goodnight from tokyo\"", cluster: "live" },
-        { label: "posted 2d ago · \"two days into onsite\"", cluster: "recent" },
-        { label: "posted 3d ago · \"flying to berlin tomorrow\"", cluster: "recent" },
-        { label: "posted 12d ago · \"first week at new gig\"", cluster: "this_month" },
-        { label: "posted 25d ago · \"april update post\"", cluster: "this_month" },
-        { label: "posted 8mo ago · \"summer of 2024 in lisbon\"", cluster: "stale_throwback" },
-        { label: "posted 18mo ago · \"thanksgiving with family\"", cluster: "stale_throwback" },
-        { label: "posted 2y ago · \"#tbt new years 2024\"", cluster: "stale_throwback" },
+        { label: "moving to NYC next month for the new role", cluster: "relocation" },
+        { label: "leaving sf, austin here we come", cluster: "relocation" },
+        { label: "just bought a house in austin 🏡", cluster: "relocation" },
+        { label: "starting at OpenAI in march", cluster: "new_job" },
+        { label: "joining anthropic next month", cluster: "new_job" },
+        { label: "left bigco today, cofounding something", cluster: "new_job" },
+        { label: "promoted to staff engineer next quarter", cluster: "new_job" },
+        { label: "just closed our seed round, $4M from sequoia", cluster: "raised_funding" },
+        { label: "we raised our series A — 18M led by a16z", cluster: "raised_funding" },
+        { label: "our company just got acquired by stripe", cluster: "raised_funding" },
+        { label: "we got engaged 💍", cluster: "got_married" },
+        { label: "married my best friend last weekend ❤️", cluster: "got_married" },
+        { label: "officially a dad — meet baby leo", cluster: "had_kid" },
+        { label: "back from paternity leave starting monday", cluster: "had_kid" },
+        { label: "morning coffee in the new kitchen", cluster: "none" },
+        { label: "this dog is my whole personality", cluster: "none" },
       ],
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────
-  // route_lookup_to_sources — person + intent → which APIs to hit
+  // ═════════════════════════════════════════════════════════════════
+  // PILLAR 3 · CUSTOMER SERVICE — ticket priority classifier
+  // The "every B2B SaaS does this" generalizer.
+  // ═════════════════════════════════════════════════════════════════
   {
-    match: (fn) => /route.*source|route.*lookup|source.*route/i.test(fn),
+    match: (fn) => /classify.*support|support.*priority|ticket.*priority|priority.*ticket/i.test(fn),
     pack: {
       clusters: [
-        { slug: "location_intent", label: "location → IG · FindMy · Maps" },
-        { slug: "activity_intent", label: "activity → IG · X · LinkedIn" },
-        { slug: "contact_intent", label: "contact → iCloud · Email Finder" },
-        { slug: "recent_post_intent", label: "recent post → IG · X · TikTok" },
-        { slug: "employment_intent", label: "employment → LinkedIn · CB" },
+        { slug: "p0_outage", label: "P0 · outage" },
+        { slug: "p1_billing", label: "P1 · billing" },
+        { slug: "p2_bug", label: "P2 · bug · how-to" },
+        { slug: "p3_feature", label: "P3 · feature request" },
+        { slug: "churn_risk", label: "churn risk · → CSM" },
+        { slug: "praise", label: "praise · → marketing" },
       ],
       samples: [
-        { label: "Sarah Chen · location", cluster: "location_intent" },
-        { label: "Liam Walsh · location", cluster: "location_intent" },
-        { label: "Ravi Iyer · location", cluster: "location_intent" },
-        { label: "Sarah Chen · activity", cluster: "activity_intent" },
-        { label: "Alex Tanaka · activity", cluster: "activity_intent" },
-        { label: "Camila Santos · activity", cluster: "activity_intent" },
-        { label: "Marcus Rodriguez · contact", cluster: "contact_intent" },
-        { label: "Nora Bennett · contact", cluster: "contact_intent" },
-        { label: "Priya Sharma · recent_post", cluster: "recent_post_intent" },
-        { label: "Jenny Patel · recent_post", cluster: "recent_post_intent" },
-        { label: "Hana Lee · recent_post", cluster: "recent_post_intent" },
-        { label: "David Kim · employment", cluster: "employment_intent" },
-        { label: "Yusuke Watanabe · employment", cluster: "employment_intent" },
-      ],
-    },
-  },
-
-  // ─────────────────────────────────────────────────────────────────
-  // normalize_social_handle — name → @handle across platforms
-  {
-    match: (fn) => /normalize.*handle|handle.*normalize|social.*handle/i.test(fn),
-    pack: {
-      clusters: [
-        { slug: "fullname_clean", label: "clean · firstname lastname" },
-        { slug: "abbreviated", label: "abbreviated · S. Chen" },
-        { slug: "underscore_handle", label: "handle-style · sarah_chen" },
-        { slug: "single_word", label: "single token · ambiguous" },
-      ],
-      samples: [
-        { label: "Sarah Chen", cluster: "fullname_clean" },
-        { label: "Marcus Rodriguez", cluster: "fullname_clean" },
-        { label: "Yusuke Watanabe", cluster: "fullname_clean" },
-        { label: "Camila Santos", cluster: "fullname_clean" },
-        { label: "sarah c.", cluster: "abbreviated" },
-        { label: "Marcus R", cluster: "abbreviated" },
-        { label: "P. Sharma", cluster: "abbreviated" },
-        { label: "Alex T.", cluster: "abbreviated" },
-        { label: "liam_walsh", cluster: "underscore_handle" },
-        { label: "camila_s", cluster: "underscore_handle" },
-        { label: "yusuke.w", cluster: "underscore_handle" },
-        { label: "alex", cluster: "single_word" },
-        { label: "ravi", cluster: "single_word" },
+        { label: "prod is down, every API returning 502", cluster: "p0_outage" },
+        { label: "URGENT: payment processing failing", cluster: "p0_outage" },
+        { label: "site is completely down for me", cluster: "p0_outage" },
+        { label: "I was charged twice this month", cluster: "p1_billing" },
+        { label: "Need a refund — never used the service", cluster: "p1_billing" },
+        { label: "why am I being charged $200 on Pro plan?", cluster: "p1_billing" },
+        { label: "How do I export my contacts to CSV?", cluster: "p2_bug" },
+        { label: "the mobile app crashes when I open inbox", cluster: "p2_bug" },
+        { label: "search isn't returning results I know exist", cluster: "p2_bug" },
+        { label: "Could you add dark mode? 🥹", cluster: "p3_feature" },
+        { label: "Feature request: Slack integration", cluster: "p3_feature" },
+        { label: "considering churning — competitor shipped X", cluster: "churn_risk" },
+        { label: "evaluating switch — what's your roadmap?", cluster: "churn_risk" },
+        { label: "the new release is amazing, team loves it", cluster: "praise" },
+        { label: "new dashboard is fantastic — much faster", cluster: "praise" },
       ],
     },
   },

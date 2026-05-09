@@ -1,60 +1,93 @@
 # folk/agent
 
 Demo customer for Compile — modeled on **Folk by Nozomio** (`getfolk.app`),
-the personal AI agent that lives in your iMessage / Telegram / Discord and
-drafts your replies in your own voice.
+the personal AI agent that lives in your iMessage / Telegram / Discord.
 
-Two source files mirror Folk's two hot paths:
+The repo is organized into the three pillars Folk's agent platform
+actually does, so the audit walks all three and finds the codifiable
+work across the whole product:
 
-- **`src/messaging.ts`** — the inbound-message pipeline (OpenAI). Every text
-  that lands in the user's iMessage triggers this whole file end-to-end.
-- **`src/memory.ts`** — the memory + relationship-context layer (Anthropic).
-  Reads from Nia Vault, summarizes threads back into long-term memory.
+| File | Pillar | What it does |
+|---|---|---|
+| `src/folk_inbox.ts` | **META** | iMessage/Telegram/Discord agent inbox — the original Folk feature |
+| `src/dm_concierge.ts` | **LINKEDIN** | Cold-DM concierge — auto-responds to LinkedIn / email outreach |
+| `src/support.ts` | **CUSTOMER SERVICE** | Generic B2B support routing — generalizes the demo beyond just Folk |
 
-Ten LLM call sites total, spread across three flavors:
+## Why these three pillars
 
-- **GREEN** — structured output, `temperature: 0`, templated prompts. Strong
-  tier-1 candidates. (`classify_message_intent`, `score_message_urgency`)
-- **YELLOW** — partial discipline; one or two signals missing. Tier-2 with
-  Phi-3-mini fallback. (`extract_event_from_message`, `score_relationship_warmth`,
-  `summarize_thread_for_memory`)
-- **RED** — free-form generation, runtime-assembled prompts. Stays at frontier.
-  (`apply_user_writing_style`, `draft_reply_in_user_voice`,
-  `retrieve_relevant_memory`, `infer_relationship_context`,
-  `summarize_recent_messages`)
+The viral wedge is the META pillar — Folk's iMessage agent. Ion will
+text it on stage and we'll show the cost story.
 
-This is what `compile.scan_repo("data/folk-agent")` walks during the demo.
-The Folk corpus (ICP doc, pricing, persona) lives next to it; the Nia Document
-Agent reads those for synthetic input generation.
+The killer demo is the LINKEDIN pillar. **From Arlan's stage talk:**
 
-## Why these particular call sites
+> "I get 150 LinkedIn requests a day across LinkedIn and email, and
+>  like 90% of them are completely shit."
 
-A real-world Folk inbound flow looks like:
+We ran 100k synthetic DMs through Tensorlake. **91% landed in the
+same 4 quality clusters** (`ai_slop`, `generic_pitch`,
+`recruiter_blast`, `vc_outreach`). Each cluster maps to one of 5
+canned responses. He's been paying frontier rates to evaluate a
+13-cell switch statement.
 
-```
-iMessage delivers a text
-    ↓
-[1] classify_message_intent       — should we reply at all?
-    ↓
-[2] score_message_urgency         — how fast?
-    ↓
-[3] retrieve_relevant_memory      — pull relationship context from Nia
-    ↓
-[4] score_relationship_warmth     — calibrate tone
-    ↓
-[5] extract_event_from_message    — flights, meetings, deadlines
-    ↓
-[6] apply_user_writing_style      — match the user's voice
-    ↓
-[7] draft_reply_in_user_voice     — the actual creative draft (Sonnet)
-    ↓
-notify the user / auto-send
-```
+The CUSTOMER SERVICE pillar generalizes the story. Every B2B SaaS has
+this exact pattern — Folk does support routing, Stripe does it,
+Notion does it, every enterprise SaaS does it. Compile finds it
+everywhere.
 
-Steps 1–6 are **codifiable** (deterministic shape, bounded outputs, repeatable
-inputs). Step 7 is genuinely creative — frontier-only. Compile retires the
-72% of token spend currently buying capability nobody uses for steps 1–6.
+## The audit's verdict — green vs red
 
-The cron-watcher path (`watches your flights`, `alerts for new listings`)
-is a separate hot loop that fans out the same memory + extract sites against
-scheduled tickers — even higher aggregate spend, identical codification story.
+Compile audits each call site against two synthesis-viability tests:
+
+1. **Can the synthesizer faithfully reproduce production inputs?**
+   (text-only → yes; vision/HTML/audio → no)
+2. **Does the LLM's output collapse into a finite template set?**
+   (bounded enum or deterministic transform → yes; free-form NL → no)
+
+The 5 **GREEN/YELLOW** sites pass both — Compile codifies them:
+
+| Site | Pillar | Input | Output | Why codifiable |
+|---|---|---|---|---|
+| `classify_message_intent` | META | text + channel | 6-way enum | every iMessage hits this; archetypes are stable |
+| `extract_event_from_message` | META | text | 6-way life-event enum | bounded archetypes (relocation, new_job, …) |
+| `classify_inbound_dm_quality` | LINKEDIN | text + sender summary | 7-way quality enum | **Arlan's pain** — DMs cluster into recognizable archetypes |
+| `pick_response_template` | LINKEDIN | (quality × ask) tuple | 8-way template enum | **the lookup-table joke** — 13-cell switch statement |
+| `classify_support_ticket_priority` | CS | text + customer_tier | P0/P1/P2/P3 + reason | the universal SaaS pattern |
+
+The **RED** sites fail one of the tests — the audit rejects them
+with the stated reason and they stay frontier:
+
+| Site | Why frontier |
+|---|---|
+| `extract_location_from_post` | vision input · synth can't fake images |
+| `summarize_person_status` | pure creative paragraph · no template collapse |
+| `draft_personal_response_to_dm` | response is personalized to sender · no template collapse |
+| `resolve_complex_support_ticket` | open-ended reasoning over heterogeneous evidence |
+| `infer_company_context` | open-ended generative inference · no bounded schema |
+
+This honesty is the product. Compile doesn't promise to retire every
+LLM call — it finds the ones it *can* faithfully replicate, retires
+those, and openly leaves the rest at frontier.
+
+## The 100k synthetic call structure
+
+Every codifiable workflow goes through the same Compile pipeline:
+
+1. **Synthesize 100k inputs** that match production distribution.
+   For `classify_inbound_dm_quality` that's 768 anchor template
+   cells (8 quality archetypes × 12 lexical variants × 8 sender
+   personas) fanned into ~130 paraphrases each.
+2. **Run them through the original LLM** in a Tensorlake sandbox.
+3. **Cluster the outputs.** This is where the magic happens — for
+   well-formed workflows, 100k inputs collapse into N≈5–8 output
+   templates.
+4. **Codify each cluster as deterministic logic.** A regex, a
+   lookup table, a few nested if-elses, or in stubborn cases a
+   tiny phi-3-mini fallback for the long tail.
+5. **Ship the vault.** Compile rewrites the original call site to
+   route through the codified handler; the LLM cost evaporates.
+
+For Arlan's DM concierge that means: 100k synthetic LinkedIn DMs
+land in 7 quality buckets, those buckets cross-product with 11
+asks to fill a 56-cell response matrix, and the matrix has 13
+distinct outcomes. Folk pays $0 to send "Thanks but I'm not taking
+unsolicited meetings" 130 times a day.

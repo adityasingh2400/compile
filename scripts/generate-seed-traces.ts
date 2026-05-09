@@ -1,12 +1,35 @@
 /**
- * Generate seed proxy traces for the always-on demo (Folk-themed).
+ * Generate seed proxy traces for the always-on demo.
  *
- * Reads the 10 call sites from data/folk-agent/src/, fabricates realistic
- * inputs/outputs per site, spreads timestamps over the last 24h, writes
- * data/proxy-traces.jsonl + data/proxy-traces-summary.json.
+ * Three-pillar narrative — "Folk (Nozomio) is one platform doing
+ * three things, and Compile finds the codifiable workflows across
+ * all three":
  *
- * Daemon reads the JSONL on startup, buckets by call_site_hash, fires
- * compile when a bucket crosses threshold (50).
+ *   META — Folk's iMessage/Telegram/Discord agent inbox.
+ *     · classify_message_intent          (T1 GREEN)
+ *     · extract_event_from_message       (T2 YELLOW)
+ *     · extract_location_from_post       (RED — vision)
+ *     · summarize_person_status          (RED — creative)
+ *
+ *   LINKEDIN — Arlan-style DM concierge. THE viral wedge: Arlan
+ *     said on stage he gets 150 LinkedIn requests/day, 90% are
+ *     unsolicited junk. Compile codifies the 90% into a lookup
+ *     table; OpenClaw runs it deterministically; the LLM bill
+ *     evaporates.
+ *     · classify_inbound_dm_quality      (T1 GREEN)
+ *     · pick_response_template           (T2 YELLOW)
+ *     · draft_personal_response_to_dm    (RED — creative)
+ *
+ *   CUSTOMER SERVICE — generic B2B support routing. The "every
+ *     SaaS company does this" generalizer that broadens the demo
+ *     beyond Arlan.
+ *     · classify_support_ticket_priority (T1 GREEN)
+ *     · resolve_complex_support_ticket   (RED — creative)
+ *     · infer_company_context            (RED — open-ended)
+ *
+ * The audit walks Folk's full repo (`data/folk-agent/src/*.ts`)
+ * and surfaces all 10 sites; 5 land in the GREEN/YELLOW codifiable
+ * tier, 5 stay RED with stated rejection reasons.
  *
  *   npx tsx scripts/generate-seed-traces.ts
  */
@@ -42,11 +65,12 @@ type SiteSpec = {
 };
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
+const pick = <T>(arr: T[], i: number): T => arr[i % arr.length]!;
+const jitter = (base: number, spread: number) => base + Math.floor(Math.random() * spread);
 
-/* ────────────────────────────────────────────────────────────────────
- * Folk-themed input fixtures.
- * Real-shaped messages an iMessage/Telegram/Discord agent would see.
- * ──────────────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════════
+ * PILLAR 1 — META · Folk inbox (iMessage/Telegram/Discord agent)
+ * ════════════════════════════════════════════════════════════════════ */
 
 const INBOUND_MESSAGES = [
   "hey can you grab dinner tomorrow night?",
@@ -72,112 +96,164 @@ const INBOUND_MESSAGES = [
   "hey, free this weekend?",
   "deadline for the proposal is friday",
   "booked the restaurant for thursday at 8",
-  "running 5 mins late",
   "could you send me your address",
+  "hi! is this still your number?",
+  "you up?",
+  "morning, how was your weekend",
 ];
 
-const URGENCY_MESSAGES = [
-  "from: mom\ncall me when you can",
-  "from: alex\nURGENT — server down, all hands",
-  "from: sarah\nwanna grab coffee sometime soon?",
-  "from: boss\nneed this by EOD please",
-  "from: friend\nhappy birthday!!",
-  "from: investor\ncan we sync this week?",
-  "from: doctor\nappointment confirmation for tomorrow 10am",
-  "from: school\npicture day is friday",
-  "from: brother\nhey wassup nothing important just checking in",
-  "from: client\nour prod is on fire RIGHT NOW",
-  "from: tinder match\nso what do you do?",
-  "from: gym friend\nyou going tonight?",
+const LIFE_EVENT_MESSAGES = [
+  "btw I'm moving to NYC next month for the new role",
+  "we got engaged 💍 saying yes was the easy part",
+  "officially a dad — meet baby leo",
+  "just closed our seed round, $4M from sequoia",
+  "left bigco today, cofounding something with friends",
+  "starting at OpenAI in march, can't wait",
+  "married my best friend last weekend ❤️",
+  "leaving sf, austin here we come",
+  "promoted to staff engineer effective next quarter",
+  "joining anthropic next month",
+  "we raised our series A — 18M led by a16z",
+  "just bought a house in austin 🏡",
+  "our company just got acquired by stripe",
+  "back from paternity leave starting monday",
+  "my wife and I are expecting another one in june!",
+  "morning coffee in the new kitchen",
+  "morning runs are getting easier",
+  "just hit 1k followers, thanks everyone",
+  "this dog is my whole personality",
+  "throwback to that lisbon trip last summer",
 ];
 
-const EVENT_MESSAGES = [
-  "let's do dinner Thursday at 7",
-  "my flight lands at SFO at 11pm",
-  "deadline for the proposal is Friday",
-  "booked the restaurant for tomorrow at 8",
-  "no plans this weekend, free if you're around",
-  "demo with the team is monday 2pm",
-  "JFK->SFO friday, back monday",
-  "need to ship the v2 launch by tuesday",
-  "anniversary dinner saturday — table for 2",
-  "kid's recital is wednesday at 6",
-  "doctor at 3pm thursday",
-];
-
-const STYLE_DRAFTS = [
-  "Hello, I am unable to attend the meeting this afternoon.",
-  "Thank you for the invitation. I would be delighted to attend.",
-  "I cannot make it tonight, perhaps another evening.",
-  "Please let me know when you are available next week.",
-];
-
-const DRAFT_INBOUNDS = [
-  "wanna get dinner tonight?",
-  "are you free this weekend",
-  "did you see my last text?",
-  "miss u",
-];
-
-const WARMTH_CONTACTS = [
-  ["mom", 247],
-  ["alex_co_founder", 189],
-  ["sarah_friend", 87],
-  ["client_acme", 32],
-  ["old_school_friend", 11],
-  ["dad", 142],
-  ["partner", 412],
-  ["investor_dan", 28],
-  ["barber", 4],
-];
-
-const THREAD_FIXTURES = [
-  ["alex: figured out the staging bug", "me: nice, what was it", "alex: race condition in the writer", "me: classic ship it"],
-  ["mom: how was your day", "me: good, long", "mom: get some rest sweetie", "me: love you mom"],
-  ["sarah: still on for thursday?", "me: yeah totally", "sarah: 8pm at the new place?", "me: see you then"],
-  ["client: prod is on fire", "me: looking now", "client: what's the eta", "me: 10 min", "me: fixed"],
-];
-
-const RETRIEVE_QUERIES = [
-  "last time I talked to alex about funding",
-  "what did mom say about the family dinner",
-  "what's sarah's restaurant preference again",
-  "remind me what we agreed on the contract",
-];
-
-const INFER_CONTACTS = [
-  "alex_co_founder",
-  "sarah_friend",
-  "client_acme",
-  "old_school_friend",
-  "mom",
-];
-
-const RECENT_FEEDS = [
-  [
-    { from: "mom", body: "call me when you have time" },
-    { from: "alex", body: "staging is deploying again" },
-    { from: "sarah", body: "dinner thursday?" },
-    { from: "investor", body: "loved the deck" },
-  ],
-];
-
-/* ────────────────────────────────────────────────────────────────────
- * Site list — 10 call sites mirroring data/folk-agent/src/.
+/* ════════════════════════════════════════════════════════════════════
+ * PILLAR 2 — LINKEDIN · DM concierge (Arlan's pain on stage)
  *
- * Counts chosen so:
- *   3 sites → WILL_COMPILE (>=50)  — show up as tier_1 workflow tabs
- *   2 sites → BELOW_THRESHOLD (>=20, <50) — tier_2 workflow tabs
- *   5 sites → FRONTIER_ZONE (<20) — show in audit, never compile
- * ──────────────────────────────────────────────────────────────────── */
+ * 150 inbound DMs/day. 90%+ are templated AI slop, recruiter blasts,
+ * VC outreach, or generic founder pitches. Folk's concierge runs every
+ * inbound through this stack.
+ * ════════════════════════════════════════════════════════════════════ */
 
-const pick = <T>(arr: T[], i: number): T => arr[i % arr.length]!;
-const jitter = (base: number, spread: number) => base + Math.floor(Math.random() * spread);
+// Real-shaped LinkedIn / email cold-outreach templates. The whole
+// demo lives or dies on these reading as instantly recognizable.
+const LINKEDIN_DMS = [
+  "Hi Arlan! Hope you're doing well. I came across your work on AI agents and was incredibly impressed by your insights on agent architecture. Would love to connect and learn more about what you're building.",
+  "Hey Arlan, big fan of OpenClaw! As someone deeply passionate about the future of agentic AI, I'd love the opportunity to connect.",
+  "Hi Arlan, I'm a founder building [stealth] in the AI agents space — series A funded, ex-Google team. Would love 15 min to share what we're working on — think there's a strong fit.",
+  "Hey Arlan! I'm building an open-source agent framework and would love your feedback. Free for a 30 min chat next week?",
+  "Arlan — quick one. We just shipped v2 of our agent observability platform and I'd love your take. 20 min coffee?",
+  "Hi Arlan, I'm a senior recruiter at Stripe and we have a Staff Engineer opportunity that I think would be a perfect match for your background. Can we schedule a quick call?",
+  "Hello Arlan, I came across your profile and would love to connect — we have an exciting Principal Engineer role at a YC-backed company.",
+  "Are you open to new opportunities? We're hiring Heads of AI for $400-600k base + equity.",
+  "Looking to expand my network in the AI space — would love to connect!",
+  "I'd love to be considered for any open roles at OpenClaw. My resume is attached.",
+  "Arlan, [VC firm] here — we're investing in agentic AI and OpenClaw caught our attention. Are you raising or open to a chat?",
+  "Hi Arlan, partner at [Tier-1 VC] — would love to chat about what you're building. Have time next week?",
+  "Hey Arlan, leading agent investments at [fund]. Big fan, would love to swap notes.",
+  "Hi Arlan, are you the founder of OpenClaw? I'd like to discuss a potential acquisition opportunity confidentially.",
+  "Hey Arlan, quick question on the OpenClaw permissions model: how do you handle credential scoping across delegated tools?",
+  "Hi Arlan! Loved your talk at AI Eng Summit. Genuinely curious — how are you thinking about agent memory persistence beyond the session?",
+  "Arlan, I tried OpenClaw and it crashed when I tried to spawn 3 sandboxes in parallel. Wanted to flag.",
+  "Got a weird issue where OpenClaw's WebSocket disconnects after ~90s. Any idea why?",
+  "Hey, the docs say the budget cap is hard but I'm seeing it overflow by ~12%. Bug or by design?",
+  "yo arlan saw your dunk on llamaindex 😂",
+  "Big fan of your work btw, the llamaindex thread sent me",
+  "Hey arlan! Met you at SXSW briefly — wanted to follow up on that agents conversation",
+  "BUY VERIFIED LINKEDIN ACCOUNTS DM ME PRICES",
+  "Make $5000/week working from home — see my profile",
+  "Free crypto airdrop for verified profiles, click here ⬇️",
+  "Hi Arlan, would you be open to advising us? Equity comp negotiable.",
+  "We're Series B, building agent infra, think you'd love what we're doing — 30 min next week?",
+  "Hi! Our open-source project would be a perfect fit for OpenClaw — would love to explore a partnership.",
+];
+
+// Pre-classified DM samples used as input to pick_response_template.
+// The "ask" axis cross-products with quality to pick a canned response.
+const DM_QUALITY_ASK_PAIRS = [
+  "quality: ai_slop\nask: connection",
+  "quality: ai_slop\nask: meeting",
+  "quality: ai_slop\nask: feedback",
+  "quality: generic_pitch\nask: meeting",
+  "quality: generic_pitch\nask: partnership",
+  "quality: generic_pitch\nask: advisor_role",
+  "quality: recruiter_blast\nask: role",
+  "quality: recruiter_blast\nask: connection",
+  "quality: vc_outreach\nask: intro",
+  "quality: vc_outreach\nask: acquisition",
+  "quality: vc_outreach\nask: meeting",
+  "quality: spam\nask: any",
+  "quality: real_question\nask: technical_help",
+  "quality: real_question\nask: feedback",
+  "quality: friend\nask: greeting",
+  "quality: friend\nask: meeting",
+];
+
+// Real Arlan-shaped personal replies for the FRONTIER residual —
+// the ~10% of DMs he actually answers himself. These show the audit
+// honestly admitting frontier still earns its keep here.
+const REAL_DM_DRAFT_INPUTS = [
+  "from: Karthik (real founder, agent infra)\ntheir msg: \"how do you handle credential scoping?\"",
+  "from: Amir (CMU prof, did agents paper)\ntheir msg: \"would you be on a panel at CMU?\"",
+  "from: Sasha (old colleague)\ntheir msg: \"in SF next week, drinks?\"",
+];
+
+/* ════════════════════════════════════════════════════════════════════
+ * PILLAR 3 — CUSTOMER SERVICE · the universal generalizer
+ *
+ * Not Folk-specific. Demonstrates "every B2B SaaS has this exact
+ * pattern" — generalizes Compile beyond just one demo customer.
+ * ════════════════════════════════════════════════════════════════════ */
+
+const SUPPORT_TICKETS = [
+  "Our prod is down — every API call is returning 502. All my users affected, this is critical.",
+  "URGENT: payment processing is failing in our checkout flow, losing $$ every minute",
+  "site is completely down for me, can't log in at all, need help ASAP",
+  "I was charged twice this month, please refund the duplicate",
+  "Need a refund — we never used the service this billing cycle",
+  "Invoice question: why am I being charged $200 on a Pro plan?",
+  "How do I export my contacts to CSV?",
+  "Where do I change my email address in the settings?",
+  "How does the API rate limiting work?",
+  "Could you add a dark mode? Pretty please 🥹",
+  "Feature request: would love a Slack integration",
+  "Idea — what if we could schedule messages to send later?",
+  "I think there's a bug — when I click 'save' nothing happens",
+  "The mobile app crashes when I open the inbox",
+  "Search isn't returning results that I know exist in my account",
+  "Hi, considering churning — your competitor just shipped a feature we need. Anything you can share?",
+  "We're evaluating a switch — what's your roadmap on agent memory?",
+  "Just wanted to say the new release is amazing, my whole team loves it 🚀",
+  "The new dashboard is fantastic — much faster than before",
+];
+
+const COMPLEX_TICKETS = [
+  "We're seeing intermittent 503s only on the EU region between 14:00-15:30 UTC, but only on accounts that were migrated last week. Our engineering team has correlated logs but can't repro locally. Need engineering deep-dive.",
+  "Compliance team is blocking our renewal because the SOC2 type 2 report shows a finding around log retention that doesn't match what your DPA states. Need someone senior to walk our CISO through the discrepancy.",
+];
+
+const COMPANY_CONTEXT_INPUTS = [
+  "Tell me about Acme Corp's likely use case based on their signals.",
+  "Infer the buying motion at Stripe based on the support thread history.",
+];
+
+/* ════════════════════════════════════════════════════════════════════
+ * SITE LIST — 10 sites, 5 codifiable + 5 frontier residuals.
+ *
+ * Volume targets:
+ *   ≥50 traces  → WILL_COMPILE   (T1 green)
+ *   ≥20 traces  → BELOW_THRESHOLD (T2 yellow)
+ *   <20 traces  → FRONTIER_ZONE  (red — audit shows them but rejects)
+ * ════════════════════════════════════════════════════════════════════ */
 
 const SITES: SiteSpec[] = [
+  /* ─── PILLAR 1 · META · Folk inbox ─────────────────────────────── */
+
+  /**
+   * #1 GREEN — every inbound message hits this. Pure text in, 6-way
+   * enum out. The hottest call site in Folk's inbox path.
+   */
   {
     fn: "classify_message_intent",
-    count: 78, // hottest path — every inbound msg fires this
+    count: 95,
     provider: "openai",
     model: "gpt-5",
     system:
@@ -185,11 +261,21 @@ const SITES: SiteSpec[] = [
     inputs: INBOUND_MESSAGES,
     responder: (text) => {
       const isQ = /\?$|\bcan you\b|\bwhat\b|\bhow\b|\bwhen\b|\bwhere\b/i.test(text);
-      const isLog = /\b(meeting|call|dinner|lunch|coffee|tomorrow|tonight|book|flight|deadline)\b/i.test(text);
-      const isEmo = /\b(love|miss|sorry|hate|hurt|happy|excited|birthday|anniversary)\b/i.test(text);
-      const isGreet = /^\s*(hey|hi|hello|yo|sup|wassup)\b/i.test(text) && text.length < 20;
+      const isLog = /\b(meeting|call|dinner|lunch|coffee|tomorrow|tonight|book|flight|deadline|sign|review|pr|move our)\b/i.test(text);
+      const isEmo = /\b(love|miss|sorry|hate|hurt|happy|excited|birthday|anniversary|thinking)\b/i.test(text);
+      const isGreet = /^\s*(hey|hi|hello|yo|sup|wassup|morning)\b/i.test(text) && text.length < 24;
       const isSpam = /\b(buy|sale|free|click|http|claim)\b/i.test(text);
-      const intent = isSpam ? "spam" : isGreet ? "greeting" : isLog ? "logistics" : isEmo ? "emotional" : isQ ? "question" : "task";
+      const intent = isSpam
+        ? "spam"
+        : isGreet
+          ? "greeting"
+          : isLog
+            ? "logistics"
+            : isEmo
+              ? "emotional"
+              : isQ
+                ? "question"
+                : "task";
       return JSON.stringify({
         intent,
         requires_reply: intent !== "spam" && intent !== "greeting",
@@ -199,161 +285,266 @@ const SITES: SiteSpec[] = [
     baseLatency: 320,
     tokenCost: 0.0019,
   },
+
+  /* ─── PILLAR 2 · LINKEDIN · DM concierge (THE ARLAN WORKFLOW) ──── */
+
+  /**
+   * #2 GREEN — runs on every inbound LinkedIn DM + cold-email reply.
+   * Arlan's volume: ~150/day per power user. The "100k synthetic
+   * DMs cluster into 5 templates" demo lives or dies here. Quality
+   * is a 7-way enum — every cluster is a recognizable archetype.
+   */
   {
-    fn: "score_message_urgency",
-    count: 62, // fires whenever requires_reply=true (most inbounds)
-    provider: "openai",
-    model: "gpt-5",
-    system: "Score reply urgency for a personal message. Return JSON {urgency, reason, confidence}.",
-    inputs: URGENCY_MESSAGES,
-    responder: (text) => {
-      const isImm = /\bURGENT\b|\bnow\b|\bfire\b|\basap\b/i.test(text);
-      const isSoon = /\btonight\b|\btomorrow\b|\btoday\b|\bsoon\b|\bEOD\b/i.test(text);
-      const isToday = /\bthis week\b|\bfriday\b|\bmonday\b|\bEOW\b/i.test(text);
-      const isLater = /\bsometime\b|\bwhenever\b|\bchecking in\b/i.test(text);
-      const urgency = isImm ? "immediate" : isSoon ? "soon" : isToday ? "today" : isLater ? "later" : "soon";
-      return JSON.stringify({ urgency, reason: `lexical match`, confidence: 0.88 });
-    },
-    baseLatency: 280,
-    tokenCost: 0.0017,
-  },
-  {
-    fn: "score_relationship_warmth",
-    count: 56, // fires per contact when generating a draft
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    system:
-      "You score the warmth of a personal relationship. Return JSON {warmth (1-5), axes:{frequency, recency, intimacy}, confidence}.",
-    inputs: WARMTH_CONTACTS.map(([id, n]) => `Contact ${id}, ${n} msgs in last 30d.`),
-    responder: (q) => {
-      const m = q.match(/(\d+)\s+msgs/);
-      const n = m ? +m[1]! : 30;
-      const w = n > 200 ? 5 : n > 80 ? 4 : n > 30 ? 3 : n > 8 ? 2 : 1;
-      return JSON.stringify({
-        warmth: w,
-        axes: { frequency: Math.min(5, n / 40), recency: 4, intimacy: w >= 3 ? 4 : 2 },
-        confidence: 0.84,
-      });
-    },
-    baseLatency: 510,
-    tokenCost: 0.0033,
-  },
-  {
-    fn: "extract_event_from_message",
-    count: 38, // fires on ~50% of inbounds (logistics/task class)
+    fn: "classify_inbound_dm_quality",
+    count: 88,
     provider: "openai",
     model: "gpt-5",
     system:
-      "Extract any time-bound event from this message. Return JSON {event_type, when_iso, title, participants}.",
-    inputs: EVENT_MESSAGES,
+      "Classify the quality of this inbound LinkedIn DM / cold email. Return JSON {quality, requires_human, confidence}.",
+    inputs: LINKEDIN_DMS,
     responder: (text) => {
-      const t = /\bflight\b|\bSFO\b|\bJFK\b|\bairport\b/i.test(text)
-        ? "flight"
-        : /\bmeeting\b|\bcall\b|\bsync\b|\bdemo\b/i.test(text)
-          ? "meeting"
-          : /\bdeadline\b|\bship\b|\bdue\b/i.test(text)
-            ? "deadline"
-            : /\bdinner\b|\brestaurant\b|\bbooked\b|\btable\b/i.test(text)
-              ? "booking"
-              : /\bship\b|\bpicture\b|\brecital\b|\bdoctor\b/i.test(text)
-                ? "task"
-                : "none";
-      const w = text.match(/\b(tomorrow|tonight|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i)?.[1]?.toLowerCase() ?? null;
+      const t = text.toLowerCase();
+      const quality = /\b(buy|crypto|airdrop|verified accounts|make \$\d|free|click here)\b/.test(t)
+        ? "spam"
+        : /\bhope you're doing well\b|\bcame across your\b|\bincredibly impressed\b|\bdeeply passionate\b|\bbig fan of\b/.test(t)
+          ? "ai_slop"
+          : /\brecruiter\b|\bopen to new\b|\bopen roles\b|\bperfect match\b|\bhiring\b/.test(t)
+            ? "recruiter_blast"
+            : /\bvc\b|\binvest|\bpartner at\b|\braising\b|\bacquisition\b|\btier-1\b/.test(t)
+              ? "vc_outreach"
+              : /\bdunk\b|\bmet you\b|\bsxsw\b|\b😂\b|\bllamaindex thread\b|\byo arlan\b/.test(t)
+                ? "friend"
+                : /\bquestion\b|\bbug\b|\bcrash|\b502\b|\bdocs say\b|\bissue\b|\bhow do you\b|\bbudget cap\b/.test(t)
+                  ? "real_question"
+                  : "generic_pitch";
       return JSON.stringify({
-        event_type: t,
-        when_iso: w,
-        title: t === "none" ? null : text.slice(0, 40),
-        participants: [],
+        quality,
+        requires_human: quality === "real_question" || quality === "friend",
+        confidence: 0.92,
       });
+    },
+    baseLatency: 340,
+    tokenCost: 0.0022,
+  },
+
+  /* ─── PILLAR 3 · CUSTOMER SERVICE · canonical generalizer ──────── */
+
+  /**
+   * #3 GREEN — every B2B SaaS has this exact workflow. Generalizes
+   * Compile beyond just Arlan/Folk. Text in, 4-way priority enum out.
+   */
+  {
+    fn: "classify_support_ticket_priority",
+    count: 72,
+    provider: "openai",
+    model: "gpt-5",
+    system:
+      "Classify the priority of this support ticket. Return JSON {priority, reason, confidence}.",
+    inputs: SUPPORT_TICKETS,
+    responder: (text) => {
+      const t = text.toLowerCase();
+      const priority = /\b(urgent|prod is down|critical|losing \$|asap|every api call|completely down)\b/.test(t)
+        ? "P0"
+        : /\b(charged twice|refund|payment|invoice|billing)\b/.test(t)
+          ? "P1"
+          : /\b(bug|crash|isn'?t (working|returning)|nothing happens)\b/.test(t)
+            ? "P2"
+            : /\b(feature request|would love|idea|could you add|please add|🥹)\b/.test(t)
+              ? "P3"
+              : "P2";
+      const reason =
+        priority === "P0" ? "outage" : priority === "P1" ? "billing" : priority === "P2" ? "bug" : "feature_request";
+      return JSON.stringify({ priority, reason, confidence: 0.94 });
     },
     baseLatency: 360,
-    tokenCost: 0.0024,
+    tokenCost: 0.0025,
   },
+
+  /* ─── PILLAR 1 · META · life-event extractor (T2 yellow) ───────── */
+
+  /**
+   * #4 YELLOW — extracts life events from inbound messages. Bounded
+   * 6-way enum but `when_iso` resolution introduces some fuzziness,
+   * so it lands in the phi-3-mini fallback tier.
+   */
   {
-    fn: "summarize_thread_for_memory",
-    count: 26, // fires once per closed thread
+    fn: "extract_event_from_message",
+    count: 38,
+    provider: "openai",
+    model: "gpt-5",
+    system:
+      "Extract any major life event from this inbound message. Return JSON {event_type, when_iso, confidence}.",
+    inputs: LIFE_EVENT_MESSAGES,
+    responder: (text) => {
+      const t = text.toLowerCase();
+      const event_type = /\bmoving\b|\bmoved\b|\brelocat|\bbought a house\b|\bback home\b|\bleaving sf\b/.test(t)
+        ? "relocation"
+        : /\bjoined\b|\bjoining\b|\bstarting at\b|\bnew role\b|\bpromoted\b|\bleft.*today\b|\bcofound/.test(t)
+          ? "new_job"
+          : /\braised\b|\bseed round\b|\bseries [a-z]\b|\bacquired\b/.test(t)
+            ? "raised_funding"
+            : /\bengaged\b|\bmarried\b|\bwedding\b|\bsaying yes\b/.test(t)
+              ? "got_married"
+              : /\bdad\b|\bbaby\b|\banother one\b|\bpaternity\b|\bkid\b/.test(t)
+                ? "had_kid"
+                : "none";
+      return JSON.stringify({
+        event_type,
+        when_iso: event_type === "none" ? null : "2026-Q2",
+        confidence: 0.89,
+      });
+    },
+    baseLatency: 380,
+    tokenCost: 0.0026,
+  },
+
+  /* ─── PILLAR 2 · LINKEDIN · response template picker (T2 yellow) ─ */
+
+  /**
+   * #5 YELLOW — THE Arlan resolution. (quality × ask) tuple → one
+   * of 8 canned response templates. Pure lookup table. Folk is
+   * paying frontier rates to evaluate `RESPONSES[quality][ask]`.
+   *
+   * The codified handler is literally a switch statement over the
+   * 56-cell quality×ask matrix.
+   */
+  {
+    fn: "pick_response_template",
+    count: 28,
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     system:
-      "Summarize this thread for long-term memory. Return JSON {summary, topics, open_loops, sentiment}.",
-    inputs: THREAD_FIXTURES.map((t) => t.join("\n---\n")),
-    responder: (thread) => {
-      const sent = /\b(love|happy|nice|sweetie)\b/i.test(thread)
-        ? "positive"
-        : /\b(fire|bug|down|hate)\b/i.test(thread)
-          ? "negative"
-          : "neutral";
-      return JSON.stringify({
-        summary: "Conversation across multiple turns covering one main topic.",
-        topics: ["follow-up", "logistics"],
-        open_loops: [],
-        sentiment: sent,
-      });
+      "Pick the right canned response template for this DM quality + ask combination. Return JSON {template, route, send_now}.",
+    inputs: DM_QUALITY_ASK_PAIRS,
+    responder: (text) => {
+      const quality = text.match(/quality:\s*(\w+)/)?.[1] ?? "";
+      const ask = text.match(/ask:\s*(\w+)/)?.[1] ?? "";
+      const TEMPLATES: Record<string, { template: string; route: string; send_now: boolean }> = {
+        ai_slop_connection: { template: "auto_dismiss", route: "archive", send_now: true },
+        ai_slop_meeting: { template: "polite_decline_meeting", route: "auto_send", send_now: true },
+        ai_slop_feedback: { template: "polite_decline_advisor", route: "auto_send", send_now: true },
+        generic_pitch_meeting: { template: "redirect_to_email", route: "auto_send", send_now: true },
+        generic_pitch_partnership: { template: "redirect_to_bd", route: "auto_send", send_now: true },
+        generic_pitch_advisor_role: { template: "polite_decline_advisor", route: "auto_send", send_now: true },
+        recruiter_blast_role: { template: "polite_decline_recruiter", route: "auto_send", send_now: true },
+        recruiter_blast_connection: { template: "auto_dismiss", route: "archive", send_now: true },
+        vc_outreach_intro: { template: "redirect_to_email", route: "auto_send", send_now: true },
+        vc_outreach_acquisition: { template: "route_to_human", route: "human_queue", send_now: false },
+        vc_outreach_meeting: { template: "redirect_to_email", route: "auto_send", send_now: true },
+        spam_any: { template: "auto_dismiss", route: "report_spam", send_now: true },
+        real_question_technical_help: { template: "route_to_human", route: "human_queue", send_now: false },
+        real_question_feedback: { template: "route_to_human", route: "human_queue", send_now: false },
+        friend_greeting: { template: "ack_friend", route: "auto_send", send_now: true },
+        friend_meeting: { template: "route_to_human", route: "human_queue", send_now: false },
+      };
+      const key = `${quality}_${ask}`;
+      const r = TEMPLATES[key] ?? { template: "route_to_human", route: "human_queue", send_now: false };
+      return JSON.stringify(r);
     },
-    baseLatency: 720,
-    tokenCost: 0.0049,
+    baseLatency: 520,
+    tokenCost: 0.0034,
   },
+
+  /* ─── FRONTIER RESIDUALS · audit explicitly REJECTS these ──────── */
+
+  /**
+   * RED · Folk people-finder vision call. The audit chrome shows
+   * this as rejected with reason: "vision input · synth can't fake
+   * images". Stays frontier permanently. Surfaces in the audit so
+   * judges see the honesty: Compile DOESN'T claim every LLM call.
+   */
   {
-    fn: "apply_user_writing_style",
-    count: 18, // yellow zone — fires when draft refinement triggers
+    fn: "extract_location_from_post",
+    count: 18,
     provider: "openai",
     model: "gpt-5",
-    system: "Rewrite the candidate draft in the user's voice based on the style excerpts.",
-    inputs: STYLE_DRAFTS,
-    responder: (d) =>
-      d
-        .replace(/\bI am\b/g, "i'm")
-        .replace(/\bcannot\b/g, "can't")
-        .replace(/^([A-Z])/, (c) => c.toLowerCase()),
-    baseLatency: 680,
-    tokenCost: 0.0046,
-  },
-  {
-    fn: "retrieve_relevant_memory",
-    count: 12, // wide variance, frontier-only
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    system: "Pick the most relevant memory for the inbound query. Explain your choice.",
-    inputs: RETRIEVE_QUERIES,
+    system:
+      "Extract a location from this social-media post (caption + image + geotag). Return JSON {city, country, neighborhood, confidence}.",
+    inputs: [
+      "caption: \"vibing in tokyo 🇯🇵\" + image",
+      "caption: \"back in NYC for the week\" + image",
+      "caption: \"sunset at venice beach\" + image",
+      "caption: \"writing this from a coffee shop in shibuya\" + image",
+      "caption: \"first day at the new office\" + image",
+    ],
     responder: () =>
-      "Best match: candidate 0 — most semantically aligned with the inbound query and most recent in time window.",
-    baseLatency: 880,
-    tokenCost: 0.0061,
-  },
-  {
-    fn: "infer_relationship_context",
-    count: 7, // frontier-only
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    system: "",
-    inputs: INFER_CONTACTS.map((c) => `Infer the user's relationship context with ${c}.`),
-    responder: () =>
-      "Long-term close contact; recent thread suggests collaborative dynamic with ongoing planning around a future meet-up. Tone is relaxed, low-stakes.",
-    baseLatency: 1080,
-    tokenCost: 0.0078,
-  },
-  {
-    fn: "summarize_recent_messages",
-    count: 4, // frontier-only — morning summary cron
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    system: "",
-    inputs: RECENT_FEEDS.map((f) => f.map((m) => `${m.from}: ${m.body}`).join("\n")),
-    responder: () =>
-      "Caught up with 4 senders this morning — mostly logistics (alex on staging, sarah on dinner) plus a check-in from mom. Nothing urgent, no replies overdue.",
-    baseLatency: 1140,
+      JSON.stringify({ city: "tokyo", country: "jp", neighborhood: "shibuya", confidence: 0.93 }),
+    baseLatency: 1180,
     tokenCost: 0.0084,
   },
+
+  /**
+   * RED · creative summary. Final natural-language paragraph the
+   * user reads in iMessage. Pure creative, frontier permanently.
+   */
   {
-    fn: "draft_reply_in_user_voice",
-    count: 2, // pure creative — TRULY frontier-only, never compiled
-    provider: "openai",
-    model: "gpt-5",
+    fn: "summarize_person_status",
+    count: 12,
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
     system: "",
-    inputs: DRAFT_INBOUNDS.map((m) => `Draft a reply to: "${m}"`),
-    responder: () => "yeah totally — thursday at 8 work for you?",
+    inputs: [
+      "signals: location=tokyo, activity=conf-speaking, recency=3hrs",
+      "signals: location=austin, activity=fundraising, recency=1d",
+      "signals: location=nyc, activity=new-job, recency=2d",
+    ],
+    responder: () =>
+      "Sarah's currently in Tokyo (last IG post 3 hours ago from a coffee shop in Shibuya). She was at SXSW in Austin yesterday — looks like she flew straight there. Still at OpenAI. No signal she's ghosting you.",
+    baseLatency: 1240,
+    tokenCost: 0.0091,
+  },
+
+  /**
+   * RED · Arlan's personal replies — the ~10% of DMs that aren't
+   * codifiable. Audit reason: "creative output · response is
+   * personalized to the sender's actual question". Stays frontier.
+   */
+  {
+    fn: "draft_personal_response_to_dm",
+    count: 8,
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    system: "",
+    inputs: REAL_DM_DRAFT_INPUTS,
+    responder: () =>
+      "Hey Karthik — we scope credentials per-tool with a capability token signed at sandbox spawn time. Happy to hop on a call next week if useful. CC'ing my asst.",
     baseLatency: 1320,
     tokenCost: 0.0094,
+  },
+
+  /**
+   * RED · open-ended customer-service reasoning. The 5% of tickets
+   * that need a human-in-the-loop reasoning trace. Audit reason:
+   * "free-form reasoning over heterogeneous evidence". Frontier.
+   */
+  {
+    fn: "resolve_complex_support_ticket",
+    count: 6,
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    system: "",
+    inputs: COMPLEX_TICKETS,
+    responder: () =>
+      "Recommendation: escalate to platform-eng pod, attach the EU-region shard logs from the 14:00-15:30 window, and have on-call walk through the migration runbook with the customer's CTO.",
+    baseLatency: 1480,
+    tokenCost: 0.011,
+  },
+
+  /**
+   * RED · open-ended company-context inference. Audit reason:
+   * "generative output · no bounded schema". Frontier.
+   */
+  {
+    fn: "infer_company_context",
+    count: 4,
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    system: "",
+    inputs: COMPANY_CONTEXT_INPUTS,
+    responder: () =>
+      "Likely use case: enterprise-wide deployment of agent infrastructure, prioritizing audit trails and per-team budget controls. Buying motion suggests platform-team led with finance review.",
+    baseLatency: 1620,
+    tokenCost: 0.012,
   },
 ];
 
