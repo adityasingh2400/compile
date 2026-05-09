@@ -54,6 +54,10 @@ const PIPELINE_STAGES: { id: PipelineStage; label: string; sub: string }[] = [
 
 const ARMED_WORKFLOWS = new Set<string>();
 
+export function resetWorkflowDriver(): void {
+  ARMED_WORKFLOWS.clear();
+}
+
 async function runWorkflowPipeline(workflowId: string): Promise<void> {
   const wf = CODIFIABLE_WORKFLOWS.find((w) => w.id === workflowId);
   if (!wf) return;
@@ -68,8 +72,8 @@ async function runWorkflowPipeline(workflowId: string): Promise<void> {
     show_halos: false,
   });
   const target = wf.visible_node_count;
-  const stepMs = 32;
-  const totalMs = 4500;
+  const stepMs = 28;
+  const totalMs = 3600;
   const stepCount = Math.ceil(totalMs / stepMs);
   const perStep = Math.ceil(target / stepCount);
   let emitted = 0;
@@ -78,11 +82,11 @@ async function runWorkflowPipeline(workflowId: string): Promise<void> {
     s().patchSynthesis(workflowId, { nodes_emitted: emitted });
     await sleep(stepMs);
   }
-  await sleep(1300);
+  await sleep(900);
   s().patchSynthesis(workflowId, { clustering: false });
-  await sleep(800);
+  await sleep(600);
   s().patchSynthesis(workflowId, { show_halos: true });
-  await sleep(3000);
+  await sleep(3500);
 
   // ── CODIFICATION ──────────────────────────────────────────────────
   s().setPipelineStage(workflowId, "codification");
@@ -91,30 +95,25 @@ async function runWorkflowPipeline(workflowId: string): Promise<void> {
   const promises: Promise<void>[] = [];
   for (let i = 0; i < wf.clusters.length; i++) {
     const cluster = wf.clusters[i]!;
-    const startDelay = 280 + i * 180;
+    const startDelay = 200 + i * 140;
     promises.push(
       (async () => {
         await sleep(startDelay);
         s().startCodifyCluster(workflowId, cluster.cluster_id);
-        // Drive the status progress as a chars counter — same shape so
-        // the existing setCodeProgress action works. We map progress
-        // to phases on the render side:
-        //   0–0.25 analyzing · 0.25–0.55 synthesizing · 0.55–0.85
-        //   validating · 0.85–1.0 committing
         const totalSteps = 100;
-        const totalMs = 2700 + i * 140;
+        const totalMs = 2200 + i * 100;
         const tick = totalMs / totalSteps;
         for (let p = 1; p <= totalSteps; p++) {
           s().setCodeProgress(workflowId, cluster.cluster_id, p);
           await sleep(tick);
         }
-        await sleep(280);
+        await sleep(220);
         s().commitClusterToVault(workflowId, cluster.cluster_id);
       })(),
     );
   }
   await Promise.all(promises);
-  await sleep(1500);
+  await sleep(1100);
 
   // ── PRODUCTION ────────────────────────────────────────────────────
   s().setPipelineStage(workflowId, "production");
@@ -127,8 +126,8 @@ async function runWorkflowPipeline(workflowId: string): Promise<void> {
   const startTs = performance.now();
   const cyclesPerSec = wf.production.calls_per_minute / 60;
   const dollarsPerSec = wf.production.dollars_saved_per_minute / 60;
-  // Run production for ~6s, then auto-advance to the next workflow.
-  const runForMs = 6000;
+  // Run production for ~5s, then auto-advance to the next workflow.
+  const runForMs = 5000;
   while (performance.now() - startTs < runForMs) {
     const elapsed = (performance.now() - startTs) / 1000;
     const ease = Math.min(1, elapsed / 1.2);

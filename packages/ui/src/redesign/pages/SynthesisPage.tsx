@@ -303,22 +303,62 @@ function CharacteristicHalos({
   const cx = w / 2;
   const cy = h / 2;
 
-  // Compute card placement: offset radially outward + clamp into viewport.
+  // Compute card placement. Two-pass:
+  //  1. Place each card radially outward from its centroid relative to canvas
+  //     center. Clamp to the viewport.
+  //  2. Resolve overlaps by nudging colliding cards apart along the
+  //     direction between their centers.
   const cards = workflow.clusters.map((c) => {
     const px = cx + c.centroid[0] * scale;
     const py = cy + c.centroid[1] * scale;
     const dx = c.centroid[0];
     const dy = c.centroid[1];
     const len = Math.hypot(dx, dy) || 1;
-    const offX = (dx / len) * Math.max(110, scale * 0.2);
-    const offY = (dy / len) * Math.max(70, scale * 0.14);
+    const offMag = Math.max(140, scale * 0.26);
+    const offX = (dx / len) * offMag;
+    const offY = (dy / len) * (offMag * 0.7);
     let cardX = px + offX;
     let cardY = py + offY;
-    // Clamp to viewport so labels don't escape the canvas.
-    cardX = Math.max(160, Math.min(w - 240, cardX));
-    cardY = Math.max(40, Math.min(h - 130, cardY));
+    cardX = Math.max(150, Math.min(w - 230, cardX));
+    cardY = Math.max(60, Math.min(h - 130, cardY));
     return { c, px, py, cardX, cardY };
   });
+
+  // Pass 2: resolve overlapping card centers — assume each card occupies
+  // ~220×120 and push apart any pair whose centers are closer than that.
+  for (let pass = 0; pass < 6; pass++) {
+    let moved = false;
+    for (let i = 0; i < cards.length; i++) {
+      for (let j = i + 1; j < cards.length; j++) {
+        const a = cards[i]!;
+        const b = cards[j]!;
+        const minX = 230;
+        const minY = 130;
+        const dxs = b.cardX - a.cardX;
+        const dys = b.cardY - a.cardY;
+        const overlapX = minX - Math.abs(dxs);
+        const overlapY = minY - Math.abs(dys);
+        if (overlapX > 0 && overlapY > 0) {
+          // Push along whichever axis has the smaller overlap.
+          if (overlapX < overlapY) {
+            const sign = dxs >= 0 ? 1 : -1;
+            a.cardX -= (overlapX / 2) * sign;
+            b.cardX += (overlapX / 2) * sign;
+          } else {
+            const sign = dys >= 0 ? 1 : -1;
+            a.cardY -= (overlapY / 2) * sign;
+            b.cardY += (overlapY / 2) * sign;
+          }
+          a.cardX = Math.max(150, Math.min(w - 230, a.cardX));
+          a.cardY = Math.max(60, Math.min(h - 130, a.cardY));
+          b.cardX = Math.max(150, Math.min(w - 230, b.cardX));
+          b.cardY = Math.max(60, Math.min(h - 130, b.cardY));
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
 
   return (
     <div ref={ref} className="cluster-halos">

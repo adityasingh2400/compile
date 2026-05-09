@@ -61,7 +61,15 @@ const SCAN_FILES = [
 // store; idempotent across StrictMode double-mounts via a module-level
 // singleton so the timeline survives unmount/remount cycles.
 
+/**
+ * Module-level guard — survives StrictMode double-mounts. Exposed via
+ * `resetAuditDriver()` so the reset hotkey can re-run the audit.
+ */
 const AUDIT_DRIVER = { started: false };
+
+export function resetAuditDriver(): void {
+  AUDIT_DRIVER.started = false;
+}
 
 async function runAuditTimeline(): Promise<void> {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -71,42 +79,42 @@ async function runAuditTimeline(): Promise<void> {
   s().setAuditPhase("boot");
   for (let i = 0; i < BOOT_LINES.length; i++) {
     s().bumpBootLines();
-    await sleep(180);
+    await sleep(120);
   }
-  await sleep(340);
+  await sleep(220);
 
   // ── SCANNING ───────────────────────────────────────────────────────
   s().setAuditPhase("scanning");
   for (let i = 0; i < SCAN_FILES.length; i++) {
     s().setFilesScanned(i + 1);
-    for (let k = 0; k < 18; k++) {
-      s().bumpAstTokens(40 + Math.floor(Math.random() * 60));
-      await sleep(14);
+    for (let k = 0; k < 12; k++) {
+      s().bumpAstTokens(60 + Math.floor(Math.random() * 80));
+      await sleep(10);
     }
-    await sleep(120);
+    await sleep(70);
   }
-  await sleep(380);
+  await sleep(240);
 
   // ── CLASSIFYING ────────────────────────────────────────────────────
   s().setAuditPhase("classifying");
   for (const site of AUDIT_CALL_SITES) {
     s().pushClassified(site);
-    await sleep(280);
+    await sleep(160);
   }
-  await sleep(520);
+  await sleep(340);
 
   // ── FILTERING ──────────────────────────────────────────────────────
   s().setAuditPhase("filtering");
   s().setFiltered(true);
-  await sleep(2200);
+  await sleep(1400);
 
   // ── MANIFEST ───────────────────────────────────────────────────────
   s().setAuditPhase("manifest");
-  await sleep(3300);
+  await sleep(2400);
 
   // ── TRANSITION → WORKSPACE ────────────────────────────────────────
   s().setAuditPhase("transition");
-  await sleep(900);
+  await sleep(700);
   s().setAuditPhase("complete");
   s().setUiStage("workspace");
 }
