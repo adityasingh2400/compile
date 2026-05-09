@@ -1,6 +1,6 @@
 # Test Plan — RealityCI
 
-Last refined: 2026-05-04 (v3)
+Last refined: 2026-05-04 (v4 — adds execution/action layer)
 Branch: main
 Repo: github.com/adityasingh2400/warden
 
@@ -27,6 +27,10 @@ Repo: github.com/adityasingh2400/warden
 - **Hidden hotkey fallback** for live ingest produces visually identical outcome
 - **Source switch** (camera ↔ agent trace) creates a new Run, prior Run state stays isolated
 - **Document Agent expansion** populates the citation card progressively via SSE → Convex stream
+- **Action dispatcher** fans out the correct response: voice, SMS, Slack,
+  email, audit log, escalation timer
+- **Phone acknowledgement** updates the action timeline live
+- **Audit ledger** contains immutable action rows for OSHA 1904 / ISO 45001 style records
 
 ## Edge Cases
 
@@ -57,13 +61,21 @@ Repo: github.com/adityasingh2400/warden
   - Nia unreachable → JSON-only citation path; ingest scenes use hidden hotkey fallback
   - Gemini Flash unreachable → YOLO-World-only mode
   - Convex cloud unreachable → fall back to local Convex dev instance
+  - InsForge unreachable → local JSON action-ledger fallback + mocked providers
+  - Twilio unreachable → hidden hotkey marks call as placed in demo mode
   - Full offline (Day 6 wifi-off rehearsal) → demo runs end-to-end, all 3 scenes
+- **Action layer:**
+  - P1 violation → voice + SMS + Slack + email + audit log
+  - P2 violation → Slack + email + audit log only
+  - P0 violation → mock emergency dispatch number only, never real 911
+  - No acknowledgement before SLA → escalation event created
+  - Duplicate acknowledgement → ignored, no double-close
 
 ## Critical Paths (these MUST work end-to-end)
 
-1. **Scene 1 — coffee mug on power strip.** START → YOLO-World detects mug + power strip → Gemini-3 confirms "above" relation → verifier finds OSHA 1910.305 rule node → red flash on node + edges to related rules and prior incidents animate → citation card hydrates with verbatim quote within 1s, then Document Agent expansion follows within 5s. **Acceptance:** red flash within 1s; verbatim quote correct; edge animation visible; no console errors.
-2. **Scene 2 — incident ingest + bag on fire extinguisher.** Mid-run, drop new incident JSON into watched folder → "Nia ingesting..." spinner → within 8s, new incident node attaches to the rule → bag placed in front of fire extinguisher card → verifier fires → cite includes BOTH the rule text AND the just-ingested prior incident. **Acceptance:** new graph node within 8s online OR hidden hotkey fallback fires within 1s; both cite cards (rule + prior incident) visible; pre-recorded `nia vault dream` clip plays as outro within scene.
-3. **Scene 3 — agent trace out-of-order tool call.** Source switch from camera to agent trace → scripted player emits `pick_up_box`, `add_product`, then `apply_label` (skipping `add_packing_material`) → verifier flags out-of-order → same red flash, same citation surface, same prior-incident edge animation. **Acceptance:** identical visual outcome to camera-driven violation; agent trace pane shows lines streaming via Convex websocket; no state bleed from previous run.
+1. **Scene 1 — coffee mug on power strip + dispatch.** START → YOLO-World detects mug + power strip → Gemini-3 confirms "above" relation → verifier finds OSHA 1910.305 rule node → red flash + edge animation → citation card hydrates → action layer dispatches P1 response → phone rings → demoer presses `1` → acknowledgement appears in action timeline. **Acceptance:** red flash within 1s; phone rings within 5s; acknowledgement reflected within 1s of keypress; audit ledger row written.
+2. **Scene 2 — incident ingest + role-based response.** Mid-run, drop new incident JSON into watched folder → "Nia ingesting..." spinner → within 8s, new incident node and response-plan edge attach to the rule → bag placed in front of fire extinguisher card → verifier fires → cite includes BOTH the rule text and just-ingested incident → Slack/SMS dispatch appears in action timeline. **Acceptance:** graph node within 8s online OR hidden hotkey fallback within 1s; Slack/SMS rows visible; no second phone call unless pacing allows.
+3. **Scene 3 — agent trace out-of-order tool call + halt action.** Source switch from camera to agent trace → scripted player emits `pick_up_box`, `add_product`, then `apply_label` (skipping `add_packing_material`) → verifier flags out-of-order → same red flash + citation → action layer calls agent owner → demoer presses `1` to halt → `agent_halt_requested` and `owner_acknowledged` appear in timeline. **Acceptance:** identical visual outcome to camera-driven violation; trace pane streams via Convex websocket; action timeline proves the same execution protocol handles agents.
 
 ## What Not to Test (intentional)
 
@@ -84,17 +96,20 @@ Repo: github.com/adityasingh2400/warden
 | Agent trace player              | 3     | Unit                            |
 | YOLO-World wrapper              | 2     | Integration (golden frames)     |
 | Gemini 3 Flash latency cap      | 1     | Integration (hard 800ms cap)    |
+| Severity classifier             | 3     | Unit                            |
+| Action dispatcher               | 5     | Unit + mocked providers         |
+| Acknowledgement tracker         | 3     | Unit                            |
 | Critical paths (3 scenes)       | 3     | E2E (Playwright)                |
 | Policy graph render             | 2     | E2E                             |
 | Network-off rehearsal           | 1     | Manual checklist                |
-| **Total**                       | **31**| mixed                           |
+| **Total**                       | **42**| mixed                           |
 
 ## Test Implementation Order
 
 P0 first, P1 alongside the corresponding feature, P2 only if buffer:
 
-- **P0 — write before integrating:** verifier state machine (8), policy graph compiler (4), citation resolver (5)
-- **P0 — write alongside feature:** YOLO-World wrapper integration (2), Gemini latency cap (1), agent trace player (3)
+- **P0 — write before integrating:** verifier state machine (8), policy graph compiler (4), citation resolver (5), severity classifier (3), acknowledgement tracker (3)
+- **P0 — write alongside feature:** YOLO-World wrapper integration (2), Gemini latency cap (1), agent trace player (3), action dispatcher (5)
 - **P0 — write before rehearsal:** the 3 critical-path E2E specs in Playwright
 - **P1 — write before dress rehearsal:** live ingest watcher (2), policy graph render E2E (2)
 - **P0 — manual:** network-off rehearsal checklist signed off the day before the hackathon

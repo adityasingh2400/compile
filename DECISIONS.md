@@ -30,17 +30,21 @@ that verifies any procedure** — physical or agentic — against the
 company's own rules, with citations. The same engine for both. That's what
 makes it new.
 
-Three things every choice in this build is optimizing for:
+Four things every choice in this build is optimizing for:
 
 1. **Visible Nia depth.** A judge from Nozomio should be able to point at
    the dashboard and identify five distinct Nia capabilities in use within
    60 seconds. If a feature can be done with Nia, it is.
 2. **Demo certainty under EF venue conditions.** No untrained models, no
-   un-rehearsed beats, no soft "should work" assumptions. Pre-cache,
+   un-rehearsed scenes, no soft "should work" assumptions. Pre-cache,
    pre-stage, pre-rehearse, network-off rehearsal day before.
 3. **On-theme synthesis.** Physical work AND AI agents through the same
    primitive. Most teams pick one. We get the synthesis dividend by
    rendering both into one verifier.
+4. **Execution, not observation.** Detection-only products still leave
+   humans to coordinate the response. RealityCI assigns ownership, calls
+   the right role, logs the audit trail, and escalates when nobody
+   acknowledges.
 
 If a decision below makes one of those three weaker, it's a bad decision
 and we revisit it.
@@ -147,7 +151,7 @@ dashboard.
 - A graph reveals structure. A list of citations doesn't. Judges retain
   structure.
 - Self-improvement story. `nia vault dream` discovers connections weekly.
-  We get a free "the system gets smarter overnight" beat in Scene 2.
+  We get a free "the system gets smarter overnight" moment in Scene 2.
 - Wikilinks with typed relationships (`supersedes`, `cites`, `references`,
   `applies_to`) give us the edges we want to animate during a violation.
 
@@ -255,7 +259,89 @@ agent-trace thread, not raw Convex tables.
 
 ---
 
-### Decision 9 — Document Agent for Post-Violation Expansion
+### Decision 9 — Action Layer, Not Dashboard-Only
+
+**What:** Every violation triggers an execution protocol: role-based
+dispatch, voice/SMS/Slack/email, acknowledgement tracking, escalation, and
+an audit log. Detection is not done until someone owns the response.
+
+**Why:**
+- Manufacturing incident response fails in the first ten minutes. The
+  research pattern is consistent: outdated contact lists, shift handover
+  gaps, unclear task ownership, fragmented communication, and paper plans.
+- A real case from manufacturing incident-response literature: SCADA alert
+  at 6:47 AM; nobody moved for nine minutes; three people assumed someone
+  else owned it; the shift lead had handed over 11 minutes earlier; the
+  emergency plan named a supervisor who had transferred months earlier.
+- OSHA 29 CFR 1910.38 requires emergency action plans with reporting,
+  evacuation, critical operations, employee accounting, rescue/medical
+  duties, and contact information. OSHA 29 CFR 1904 / ISO 45001 require
+  records. An action timeline creates that record as a byproduct.
+- A phone ringing on stage is a better demo than another red dashboard
+  tile. Everyone in the room understands "the system called the safety
+  officer."
+
+**What we considered and rejected:**
+- *Dashboard-only.* Easier but incomplete. Reject.
+- *Send Slack only.* Too quiet for a live demo, too weak for a P1/P0 safety
+  scenario. Reject as the only channel; keep it as one channel.
+- *Real 911 / external emergency dispatch.* Illegal and reckless in a
+  demo. Reject categorically. Use a mock dispatch number only.
+
+---
+
+### Decision 10 — InsForge Owns the Action Ledger
+
+**What:** Use InsForge for the execution side: Postgres action ledger,
+edge-function dispatch, role roster, acknowledgements, escalation timers,
+and audit export. Convex remains the live UI/state layer.
+
+**Why:**
+- Convex is great for live UI reactivity. InsForge is better for durable
+  backend records and fan-out side effects.
+- InsForge's pitch is agent-native backend: Postgres, auth, storage, edge
+  functions, realtime, AI model gateway, vector DB. The action layer uses
+  exactly those primitives.
+- Postgres rows feel like a real compliance/audit record; this matters
+  for OSHA 1904 / ISO 45001 style reporting.
+- Edge Functions are the right place to dispatch to Twilio/Slack/SMS/email
+  and update provider status.
+- This adds a fifth sponsor in a load-bearing way without polluting the
+  Nia story.
+
+**What would change our mind:**
+- If InsForge setup burns more than 2 hours, we fall back to Convex tables
+  for the hackathon and document InsForge as the production execution
+  layer. But the preferred path is InsForge.
+
+---
+
+### Decision 11 — Twilio + Pre-Recorded Voice for Demo, Bland/Vapi/Retell for Production
+
+**What:** The stage demo uses Twilio outbound call + pre-recorded
+ElevenLabs audio/TwiML. Production architecture can swap to Bland, Vapi,
+or Retell for conversational voice agents.
+
+**Why:**
+- A live LLM voice agent failing or wandering during the pitch is not a
+  risk worth taking.
+- Twilio + static TwiML is deterministic. It rings the phone reliably and
+  accepts DTMF `1`/`2` reliably.
+- Bland is strong for outbound production calling (Pathways, high-volume
+  dialing). Retell has lower median latency. Vapi is flexible. All are
+  reasonable production options. None needs to be live in the hackathon
+  demo to prove the concept.
+
+**What we considered and rejected:**
+- *Bland live in demo.* Strong production fit, but dependency risk and
+  account setup risk. Reject for hackathon path.
+- *Vapi live in demo.* Flexible but more integration surface. Reject.
+- *Retell live in demo.* Lower median latency but still live voice-agent
+  risk. Reject.
+
+---
+
+### Decision 12 — Document Agent for Post-Violation Expansion
 
 **What:** When a violation fires, RealityCI optionally launches a Nia
 Document Agent against the violated rule's source PDF, with a JSON schema
@@ -281,7 +367,7 @@ recommended_remediation}`.
 
 ---
 
-### Decision 10 — Hazard Setup with Everyday Items
+### Decision 13 — Hazard Setup with Everyday Items
 
 **What:** Stage the demo with everyday items (coffee mug, paper bag,
 extension cord, candle, a stick simulating a ladder, printed signs for
@@ -308,7 +394,7 @@ equipment in production."
 
 ---
 
-### Decision 11 — Manual Hotkey Run Lifecycle, Not Auto-Detect
+### Decision 14 — Manual Hotkey Run Lifecycle, Not Auto-Detect
 
 **What:** Demo operator presses a hotkey to start each scene. No auto-
 detection of "the demo is starting now."
@@ -322,7 +408,7 @@ detection of "the demo is starting now."
 
 ---
 
-### Decision 12 — Tasks, Not Days
+### Decision 15 — Tasks, Not Days
 
 **What:** Track work as a flat priority-tagged task list, not a day-by-day
 schedule.
@@ -355,12 +441,12 @@ PDFs, datasets, Slack, Google Drive, and local knowledge sources."
 
 | Capability             | How we use it                                                                                |
 |------------------------|----------------------------------------------------------------------------------------------|
-| Universal `index`      | Ingest OSHA, NFPA, SOPs, manuals, training transcripts, incident logs, mock Slack channel    |
+| Universal `index`      | Ingest OSHA, NFPA, SOPs, manuals, response plans, training transcripts, incident logs, mock Slack channel |
 | Search modes (4)       | `query` (UI tooltip), `universal` (verifier rule lookup), `deep` (post-violation expansion), `web` (live OSHA cross-reference) |
 | `nia_grep`             | Exact rule-number regex lookups                                                              |
 | `nia_read`             | Fast snippet + page fetch for citation card                                                  |
 | `nia_explore`          | Source inspector pane (debug-only)                                                           |
-| Document Agent         | Post-violation typed-extraction with JSON schema + Claude Haiku                              |
+| Document Agent         | Post-violation typed extraction + response-plan extraction with JSON schemas + Claude Haiku   |
 | Data Extraction (`detect`) | Bounding-box highlighting of violated diagrams in citation card                          |
 | Engineering Extraction | P&ID and equipment-manual diagram parsing at compile time                                    |
 | Vault                  | The policy graph itself: compiled-truth pages with timeline, wikilinks, force-graph view     |
@@ -373,10 +459,10 @@ is a Nia Vault rendered with React Flow. Every node is a wiki page Nia
 maintains. The edges are typed wikilinks Nia generated. When the camera
 catches a violation, we use Nia's `universal` search mode to find the
 matching rule, `nia_read` for the immediate quote, then a Document Agent
-with a JSON schema for cross-references and remediation. The incident
-ingest beat in Scene 2 is Local Sync watching a folder. The 'graph
-improves overnight' moment is `nia vault dream`. We use 12 distinct Nia
-capabilities. None of them is 'just RAG.'"
+with a JSON schema for cross-references, remediation, and the response
+plan. The incident ingest scene is Local Sync watching a folder. The
+'graph improves overnight' moment is `nia vault dream`. We use 12+
+distinct Nia capabilities. None of them is 'just RAG.'"
 
 ### Convex (strong-fit, real-time backend)
 
@@ -388,17 +474,38 @@ workflows, and a 2025-shipped Agent Component for AI workflows.
 | Surface                      | How                                                              |
 |------------------------------|------------------------------------------------------------------|
 | Reactive queries             | Drives policy graph state in React Flow. No polling.            |
-| Mutations                    | `start_run`, `emit_event`, `fire_violation`, `ingest_incident`  |
+| Mutations                    | `start_run`, `emit_event`, `fire_violation`, `ingest_incident`, `record_action_event` |
 | Agent Component              | Threads + messages for Scene 3 agent trace                       |
 | Streaming deltas (websocket) | Live agent trace pane updates                                    |
 | Cross-thread message search  | "Have I seen this tool-call sequence before?" lookup             |
 
 **60-second pitch from Convex's POV:** "Every visible state change in the
 dashboard — graph nodes turning green or red, citation card hydrating,
-agent trace lines streaming — is a Convex reactive query. We don't poll.
+agent trace lines streaming, action timeline rows appearing — is a Convex reactive query. We don't poll.
 Convex pushes deltas over a websocket. The agent-trace thread in Scene 3
 uses the Agent Component's `saveStreamDeltas` so the pane updates as the
 script runs."
+
+### InsForge (strong-fit, action backend)
+
+**What InsForge is:** Agent-native backend with managed Postgres,
+auto-generated APIs, auth, storage, Edge Functions, realtime, AI model
+gateway, and vector DB.
+
+**What we use:**
+
+| Surface         | How |
+|-----------------|-----|
+| Postgres        | Immutable `action_events`, role roster, acknowledgements, audit log |
+| Edge Functions  | `dispatchActionPlan` fans out Slack/SMS/email/voice and starts SLA timers |
+| Realtime        | Optional push from action ledger to dashboard if Convex bridge is unavailable |
+| AI Model Gateway| Summarize violation into voice/SMS/email payloads in production mode |
+| Auto REST       | Fast inspection/debugging by the team and agents |
+
+**60-second pitch from InsForge's POV:** "Nia decides what the company
+policy says. Convex shows it live. InsForge executes the response. Every
+voice call, SMS, Slack message, acknowledgement, and escalation becomes an
+append-only Postgres action event. That is the compliance record."
 
 ### Vercel (strong-fit, frontend deploy)
 
@@ -413,6 +520,15 @@ the Vercel deploy URL within 60 seconds. The dashboard is a Next.js App
 Router app with React Server Components for the static shell and Convex
 React for live state."
 
+### Aside (stretch, browser-action layer)
+
+**What Aside is:** A browser that acts as an OS for AI agents.
+
+**Stretch use:** After a violation closes, the RealityCI action agent opens
+a mock ServiceNow / OSHA 300 / VelocityEHS form in a browser and fills it
+from the InsForge action ledger. This is visually compelling, but not P0.
+Core demo already proves execution through voice/SMS/Slack/email.
+
 ### Cut sponsors and why
 
 - **Tensorlake** — Cut entirely in v3 (was Stretch in v2). The local
@@ -423,8 +539,6 @@ React for live state."
 - **Hyperspell** — Was Stretch in v2 for operator-personal memory. Cut
   because Nia's Vault + Context Sharing already covers personal/episodic
   memory, and adding Hyperspell on top would split the memory story.
-- **Aside** — Was a "browser as OS for AI" stretch. Not relevant to a
-  procedure-verification runtime.
 - **World Labs** — Was a stretch for generated training environments. Not
   on the critical path.
 - **Reacher** — Distribution-layer sponsor. Not relevant.
@@ -498,7 +612,7 @@ shallow integrations publicly. The two posts that shaped our build:
 
 - The policy graph IS a Vault. We don't build a parallel "rules database."
 - `nia vault dream` is in the demo (Scene 2 finale clip). The "self-
-  improving" beat is Arlan's framing applied to safety policies.
+  improving" moment is Arlan's framing applied to safety policies.
 - Force-directed graph view in `app.trynia.ai/vaults` is the visual we
   mirror in our React Flow pane. Mirroring his UI is a deliberate
   signal: *we use this, we know what it looks like, we built around it.*
@@ -550,7 +664,47 @@ If we get a chance to talk to him at the venue:
 
 ---
 
-## 5. Why Each Cut Feature Was Cut
+## 5. Lessons from Manufacturing Incident Response Research
+
+The action layer came from one pattern: the expensive failure is often not
+that the facility failed to detect the problem. It is that nobody owned
+the next step.
+
+Research summary:
+
+- OSHA 29 CFR 1910.38 requires emergency action plans to cover reporting,
+  evacuation, critical plant operations, employee accounting, rescue /
+  medical duties, and contact information.
+- OSHA 29 CFR 1904 and ISO 45001-style systems require records of what
+  happened, who was notified, what action was taken, and when.
+- A manufacturing-response case study: SCADA alert fired at 6:47 AM;
+  nobody moved for nine minutes; three people assumed someone else owned
+  it; the shift lead had handed over eleven minutes earlier; the printed
+  emergency plan named a supervisor who had transferred months before.
+- The most common first-ten-minute failures: stale contact data, shift
+  handover gaps, no task ownership, fragmented communications, and paper
+  plans under pressure.
+- Good response infrastructure does five things: tasks go to roles, alerts
+  reach people simultaneously, workflows activate on declaration,
+  decision-makers get a live view, and the audit trail builds itself.
+
+RealityCI mirrors those five points exactly:
+
+| Failure mode | RealityCI response |
+|--------------|--------------------|
+| Stale named contacts | Dispatch to roles from `role_roster`, not names |
+| Shift handover gap | Active incidents and unresolved hazards appear in Convex + InsForge ledger |
+| No task ownership | First violation creates a role-owned action plan |
+| Fragmented channels | Voice + SMS + Slack + email fan out simultaneously |
+| Paper plan under pressure | Nia Document Agent extracts the plan; InsForge executes it |
+| Missing audit trail | Every action event is append-only and timestamped |
+
+This is why the phone-call scene matters. It is not a gimmick. It is the
+visible version of "workflows activate on declaration."
+
+---
+
+## 6. Why Each Cut Feature Was Cut
 
 | Feature                         | Why cut                                                             |
 |---------------------------------|---------------------------------------------------------------------|
@@ -559,16 +713,16 @@ If we get a chance to talk to him at the venue:
 | Image-region (bbox) custom code | Nia's `extract/detect` exposes bbox natively. Free win, less code.  |
 | Tensorlake                      | Local compiler is fast enough; sandboxed compute is overkill.       |
 | Hyperspell                      | Vault + Context Sharing covers the same memory layer, more cleanly. |
-| Aside                           | Browser-as-OS doesn't fit a procedure-verification runtime.         |
 | World Labs                      | Generated training environments are off-critical-path.              |
 | Reacher                         | Distribution layer; not in the demo.                                |
 | Auto-detect run start           | Manual hotkey is bulletproof for scripted demos. v2 feature.        |
 | Live (real LLM) agent in Scene 3| Network-dependent. Scripted trace ships; live is one-file v2 swap.  |
+| Live voice-agent conversation   | Twilio + pre-recorded TwiML is deterministic for demo; Bland/Vapi/Retell are production paths. |
 | 6 Nia ingest sources            | 3 Core in v2 plan. v3 keeps 5-7 Core; the rest are Stretch.         |
 
 ---
 
-## 6. What Would Cause Us to Replan
+## 7. What Would Cause Us to Replan
 
 If any of these turn out to be true at dress rehearsal, we replan:
 
@@ -583,6 +737,12 @@ If any of these turn out to be true at dress rehearsal, we replan:
 - Convex Agent Component has a sharp edge we didn't anticipate. (Mitigation:
   drop to raw Convex tables; we lose websocket streaming deltas but keep
   reactive queries. Demo still works, less polished.)
+- InsForge setup burns more than 2 hours. (Mitigation: keep the InsForge
+  section in the architecture, but use Convex tables for the hackathon
+  action ledger and document InsForge as the production execution backend.)
+- Twilio outbound call setup fails. (Mitigation: hidden hotkey marks the
+  call as placed and plays the voice message from laptop speakers; still
+  show the action timeline.)
 - Pitch length is shorter than 3 minutes. (Mitigation: cut Scene 1 to 30s,
   Scene 2 to 30s, Scene 3 to 60s. Outro to 5s. Still fits.)
 - One team member can't finish their P0 tasks on time. (Mitigation:
@@ -592,7 +752,7 @@ If any of these turn out to be true at dress rehearsal, we replan:
 
 ---
 
-## 7. Open Questions For The Team
+## 8. Open Questions For The Team
 
 These are the calls that haven't been made yet and need to be made early:
 
@@ -605,7 +765,9 @@ These are the calls that haven't been made yet and need to be made early:
 4. **Backup video ownership.** Who records, who owns the hotkey runbook,
    who is the demo-day backup operator if the primary runs into a
    problem.
-5. **Live LLM in Scene 3 (post-hackathon).** Worth a Q&A line: "the
+5. **Phone number ownership.** Which team-controlled number receives the
+   live call? Which number acts as mock emergency dispatch?
+6. **Live LLM in Scene 3 (post-hackathon).** Worth a Q&A line: "the
    architecture supports live tool-use; we ship the deterministic
    scripted version for demo reliability."
 
