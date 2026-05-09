@@ -1,8 +1,10 @@
 # Synthesizer Prompt Spec
 
-Concrete spec for the LLM call that turns a trace cluster into a typed function. This is the demo's spine — derisk Friday by validating it against 3 hardcoded clusters.
+Concrete spec for the codegen call that turns a trace cluster into a typed function. **Critical architectural note:** this prompt is sent to the **customer's own agent** (Codex CLI / Claude Code / Cursor / Devin / etc.) via the `compile.request_synthesis()` MCP call — NOT to a model behind Compile's API key. The customer's agent runs the codegen on its own LLM key, against its own data, and submits the result back via `compile.submit_synthesis()`. Compile validates and gates; it does not generate.
 
-## Input format (what we send to Codex / Claude)
+This is the demo's spine — derisk Friday by validating it against 3 hardcoded clusters.
+
+## Input format (the synthesis spec Compile returns to the customer's agent)
 
 ```json
 {
@@ -12,15 +14,27 @@ Concrete spec for the LLM call that turns a trace cluster into a typed function.
   "output_schema": <JSON Schema inferred from observed outputs>,
   "traces": [
     { "input": <observed input>, "output": <observed output>, "tool_calls": [...] },
-    ...up to 100 traces, downsampled if more
+    ...all traces split into:
   ],
+  "trace_split": {
+    "train": [<70% of indices — the agent sees these for codegen>],
+    "val":   [<15% — the agent may use for self-validation>],
+    "holdout": [<15% — Compile keeps these private, used for ≥98% gate>]
+  },
+  "axis_scores": {
+    "schema_stability": 0.0-1.0,
+    "determinism":      0.0-1.0,
+    "economic_value":   { "monthly_calls": N, "annual_savings_usd": N, "break_even_hits": N }
+  },
   "customer_docs": [
     { "title": "ICP definition", "nia_doc_id": "...", "excerpt": "..." }
   ]
 }
 ```
 
-Trace count target: **30 minimum, 100 ideal**. Below 30, return null with reason "insufficient_data".
+Trace count target: **30 minimum, 100 ideal**. Below 30, the identification pipeline does not surface the cluster as a candidate (cluster is in the negative Vault with `reason: insufficient_data`, expiring retry policy).
+
+The `holdout` indices are NOT included in the spec sent to the agent — Compile keeps holdout traces private and runs them post-hoc to gate. This prevents the agent from overfitting its emitted function to the same examples it generated from. Resolves the "98% gate is gameable" critique.
 
 ## Output format (what the synthesizer emits)
 
@@ -47,42 +61,56 @@ Strict JSON envelope. Codex/Claude must respond in this shape — validated by `
 }
 ```
 
-Fallback when can't synthesize:
+Fallback when can't synthesize. **This envelope is written to Nia Vault as a negative entry** — pattern miner checks it before triggering future synthesis runs on matching clusters, so the retry_policy is load-bearing for unit economics.
+
 ```json
 {
   "synthesizable": false,
   "reason": "insufficient_data" | "high_variance_outputs" | "creative_task" | "novel_reasoning_required",
-  "recommendation": "stay_tier_3" | "wait_for_more_traces"
+  "recommendation": "stay_tier_3" | "wait_for_more_traces",
+  "retry_policy": {
+    "type": "sticky" | "expiring",
+    "retry_when_traces": 30,
+    "retry_on_distribution_shift": false
+  },
+  "cluster_signature": "<embedding hash or nia semantic id — used as negative cache key>"
 }
 ```
 
-## The prompt (verbatim, send to Codex/Claude)
+Retry policy by reason:
+
+| reason | type | retry_when_traces | retry_on_distribution_shift |
+|---|---|---|---|
+| `creative_task` | sticky | — | false |
+| `novel_reasoning_required` | sticky | — | false |
+| `high_variance_outputs` | sticky | — | true |
+| `insufficient_data` | expiring | 30 (then 100) | false |
+
+## The prompt (verbatim, sent to the customer's agent)
 
 ```
-You are a code synthesizer. Your job: examine a cluster of LLM call traces and emit a deterministic TypeScript function that reproduces the LLM's behavior on hot patterns, with explicit fallback for branches you can't capture.
+You are a code synthesizer. Your job: examine a cluster of LLM call traces from the calling agent's own traffic and emit a deterministic TypeScript function (or a Tier-2 prompt pack) that reproduces the LLM's behavior on hot patterns, with explicit fallback for branches you can't capture.
 
-YOU WILL RECEIVE: a JSON object with prompt_template, tool_schemas, input_schema, output_schema, traces (30-100 examples), and customer_docs.
+YOU WILL RECEIVE: a JSON object with prompt_template, tool_schemas, input_schema, output_schema, traces (train+val splits — holdout is withheld for gating), customer_docs, and axis_scores from Compile's identification pipeline.
 
 YOU WILL EMIT: a single JSON object matching the output schema below. NO PROSE OUTSIDE THE JSON.
 
-DECISION TREE FOR TIER CLASSIFICATION:
+The cluster has ALREADY passed Compile's three codifiability axes (schema_stability ≥0.95, determinism ≥0.95, economic_value positive at break-even). Your job is to choose the tier and emit code, not to re-litigate whether the cluster is codifiable.
 
-1. Tier 1 (deterministic) — emit if ALL hold:
-   - Output is fully determined by structured features of input (regex matches, enum values, schema fields, template substitution)
-   - No two traces with the "same input features" produced different outputs
-   - Logic can be expressed in <50 lines of TS without ML
-   Examples: invoice field extraction, intent classification with stable label set, format normalization, cross-system glue.
+TIER SELECTION (use the axis_scores to decide):
 
-2. Tier 2 (local small LLM) — emit if Tier 1 doesn't fit AND:
-   - Outputs vary in surface form but converge on small set of meanings (paraphrases, light summarization, classification with fuzzy boundaries)
-   - A 1B-parameter model could plausibly produce equivalent outputs given the prompt + few-shot examples
-   - You can write an optimized prompt + 5 few-shots that demonstrably steer the small model
-   Examples: support reply tone-matching, lead qualification with judgment calls, light translation.
+1. Tier 1 (deterministic TS function) — choose if:
+   - schema_stability ≥ 0.98 AND determinism ≥ 0.98
+   - Logic expressible in <50 lines of TS without ML
+   - Output reconstructable from structured input features (regex, enum, schema field, template substitution)
+   Examples: invoice field extraction, intent classification with stable label set, format normalization.
 
-3. Tier 3 only (do not synthesize) — emit synthesizable=false if:
-   - Outputs require novel reasoning per call (creative writing, debugging, multi-step planning)
-   - Variance in output is intrinsic to the task value (no two summaries should be identical)
-   - <30 traces observed (insufficient_data)
+2. Tier 2 (local small LLM with prompt pack) — choose if Tier 1 doesn't fit AND:
+   - schema_stability ≥ 0.90 with surface-form variance under fixed meaning
+   - A 1B-parameter model can plausibly produce equivalent outputs given a tuned prompt + 5 few-shots drawn from train traces
+   Output a prompt_pack (system prompt + few-shots) AND an acceptance test that gates Tier 2 outputs at runtime — failures escalate immediately to Tier 3 (no silent degradation).
+
+3. synthesizable=false — emit if neither tier fits given the actual traces (e.g., axis scores qualify the cluster but on inspection the variance is intrinsic to a creative subtask). This should be rare since the identification pipeline already filtered.
 
 QUALITY RULES:
 
