@@ -30,13 +30,16 @@ export interface INiaClient {
 }
 
 export class StubNiaClient implements INiaClient {
-  private readonly entries = new Map<
+  private readonly bySignature = new Map<
     string,
     PositiveVaultEntry | NegativeVaultEntry
   >();
+  private readonly byFunctionId = new Map<string, PositiveVaultEntry>();
 
-  async vaultLookup(cluster_signature: string): Promise<VaultLookupResult> {
-    const hit = this.entries.get(cluster_signature);
+  async vaultLookup(key: string): Promise<VaultLookupResult> {
+    // Two-index lookup: try cluster_signature first (routing path), then
+    // function_id (run_codified path).
+    const hit = this.bySignature.get(key) ?? this.byFunctionId.get(key);
     if (!hit) return { state: "unknown" };
     return hit.kind === "positive"
       ? { state: "positive", entry: hit }
@@ -44,7 +47,10 @@ export class StubNiaClient implements INiaClient {
   }
 
   async vaultWrite(entry: VaultEntry): Promise<{ vault_page_id: string }> {
-    this.entries.set(entry.cluster_signature, entry);
+    this.bySignature.set(entry.cluster_signature, entry);
+    if (entry.kind === "positive") {
+      this.byFunctionId.set(entry.function_id, entry);
+    }
     return { vault_page_id: `stub:${entry.cluster_signature}` };
   }
 

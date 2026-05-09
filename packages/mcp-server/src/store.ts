@@ -3,6 +3,8 @@ import type { SynthesisSpec, Trace } from "@compile/schemas";
 export interface PendingRequest {
   request_id: string;
   cluster_id: string;
+  /** template-skeleton hash used as Vault key — the same key find_function derives at routing time. */
+  cluster_signature: string;
   spec: SynthesisSpec;
   /** Indices into the FULL trace list — kept private from the agent. */
   holdout_traces: Trace[];

@@ -12,11 +12,13 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@compile/schemas": "*",
     "@compile/nia": "*",
+    "@compile/identifier": "*",
     "@compile/runtime": "*",
     "@compile/synthesizer": "*",
     "@modelcontextprotocol/sdk": "^1.0.4",
