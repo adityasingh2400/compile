@@ -30,6 +30,7 @@ import {
 import { CODIFIABLE_WORKFLOWS } from "./data/workflows.js";
 import { AuditStage, resetAuditDriver } from "./redesign/AuditStage.js";
 import { Workspace, resetWorkflowDriver } from "./redesign/Workspace.js";
+import { useTensorlakeStatus } from "./redesign/useTensorlakeStatus.js";
 
 const PIPELINE_ORDER: PipelineStage[] = [
   "synthesis",
@@ -38,6 +39,10 @@ const PIPELINE_ORDER: PipelineStage[] = [
 ];
 
 export function App(): JSX.Element {
+  // Pull real Tensorlake + Nia metadata from the prewarm-written JSON
+  // files. Mount-once; later daemon stream events override.
+  useTensorlakeStatus();
+
   const stage = useRedesignStore((s) => s.ui_stage);
   const auditPhase = useRedesignStore((s) => s.audit.phase);
   const setActiveWorkflow = useRedesignStore((s) => s.setActiveWorkflow);

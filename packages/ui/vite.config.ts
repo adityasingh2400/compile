@@ -11,6 +11,11 @@ export default defineConfig({
   server: {
     port: 5173,
     host: "0.0.0.0",
+    fs: {
+      // Allow `?raw` imports from the monorepo `data/` directory
+      // (proxy-traces.jsonl + summary live there).
+      allow: ["..", "../.."],
+    },
     proxy: {
       "/daemon": {
         target: daemonTarget,
