@@ -7992,10 +7992,17 @@ button {
   padding: 0 4px;
 }
 
-.audit-org-grid.wf-count-1 { grid-template-columns: minmax(360px, 720px); justify-content: center; }
+/* Bigger constellations: max 2 columns at any width so each canvas
+   is at least ~600px wide on a typical 1280-1600px desktop. */
+.audit-org-grid.wf-count-1 { grid-template-columns: minmax(520px, 880px); justify-content: center; }
 .audit-org-grid.wf-count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.audit-org-grid.wf-count-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.audit-org-grid.wf-count-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .audit-org-grid.wf-count-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.audit-org-grid.wf-count-5,
+.audit-org-grid.wf-count-6,
+.audit-org-grid.wf-count-7,
+.audit-org-grid.wf-count-8,
+.audit-org-grid.wf-count-9 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 @media (max-width: 1024px) {
   .audit-org-grid.wf-count-3,
@@ -8152,8 +8159,19 @@ button {
 .audit-org-wf-canvas {
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 0.9;
-  margin-top: 14px;
+  aspect-ratio: 1 / 1.05;
+  margin-top: 18px;
+  transition: transform 460ms var(--ease-out);
+}
+
+.audit-org-wf.is-dimmed {
+  opacity: 0.32;
+  filter: saturate(0.6);
+  transition: opacity 360ms var(--ease-out), filter 360ms var(--ease-out);
+}
+
+.audit-org-wf.has-focus .audit-org-wf-canvas {
+  transform: scale(1.04);
 }
 
 .audit-org-wf-halo {
@@ -8183,11 +8201,10 @@ button {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-secondary);
-  pointer-events: none;
   white-space: nowrap;
   transition: opacity 320ms var(--ease-out);
   animation: audit-org-cluster-in 520ms var(--ease-out) var(--cluster-delay) both;
-  z-index: 2;
+  z-index: 4;
 }
 
 @keyframes audit-org-cluster-in {
@@ -8219,12 +8236,18 @@ button {
   gap: 6px;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 320ms var(--ease-out), transform 320ms var(--ease-out);
+  transition: opacity 320ms var(--ease-out), transform 320ms var(--ease-out),
+    left 460ms var(--ease-out), top 460ms var(--ease-out);
 }
 
 .audit-org-node.is-visible {
   opacity: 1;
+  pointer-events: auto;
   animation: audit-org-node-in 480ms var(--ease-out) var(--node-delay) both;
+}
+
+.audit-org-node.is-faded {
+  pointer-events: none;
 }
 
 @keyframes audit-org-node-in {
@@ -8431,4 +8454,664 @@ button {
 .audit-org-ticker .tick.current .tick-dot {
   box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.15);
   animation: rd-landing-pulse 1.6s var(--ease-out) infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Audit · interactive overlays
+ *
+ * Three new layers added on top of the organic audit:
+ *
+ *   1. Hover tooltip on every node — shows author + quote + timing.
+ *   2. Cluster focus side rail — slides in from the right when a
+ *      cluster tag is clicked, lists all synthetic calls in that
+ *      cluster.
+ *   3. Node detail overlay — full-bleed reveal with input/output
+ *      fields and frontier-vs-vault comparison.
+ *
+ * Everything stays panel-less: cream surfaces blended with maroon
+ * accents, no hard rectangle borders.
+ * ────────────────────────────────────────────────────────────────*/
+
+/* Make node dots + labels noticeably bigger so hover targets are
+   easy to hit, and labels are readable. */
+.audit-org-node-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.audit-org-node-label {
+  font-size: 11.5px;
+  max-width: 22ch;
+}
+
+.audit-org-node {
+  cursor: pointer;
+  z-index: 3;
+}
+
+.audit-org-node.is-faded {
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.audit-org-node.is-focus .audit-org-node-dot {
+  width: 10px;
+  height: 10px;
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.10);
+}
+
+.audit-org-node.is-focus .audit-org-node-label {
+  opacity: 1;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.audit-org-node:hover .audit-org-node-dot {
+  width: 11px;
+  height: 11px;
+  background: var(--maroon);
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.18),
+    0 0 0 9px rgba(192, 57, 43, 0.06);
+}
+
+.audit-org-node:hover .audit-org-node-label {
+  opacity: 1;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Cluster tags become buttons — small affordance hint. */
+.audit-org-cluster-tag {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 999px;
+  transition: background 220ms var(--ease-out), color 220ms var(--ease-out),
+    opacity 320ms var(--ease-out), transform 220ms var(--ease-out);
+}
+
+.audit-org-cluster-tag:hover {
+  background: rgba(192, 57, 43, 0.06);
+}
+
+.audit-org-cluster-tag:hover .audit-org-cluster-label {
+  color: var(--maroon);
+}
+
+.audit-org-cluster-tag.is-focus {
+  background: rgba(192, 57, 43, 0.1);
+  transform: translate(-50%, -50%) scale(1.06);
+}
+
+.audit-org-cluster-tag.is-focus .audit-org-cluster-label {
+  color: var(--maroon);
+}
+
+.audit-org-cluster-tag.is-faded {
+  opacity: 0.28;
+}
+
+/* ── Hover tooltip ────────────────────────────────────────────── */
+
+.audit-org-hover-tip {
+  position: fixed;
+  z-index: 50;
+  width: 300px;
+  pointer-events: none;
+  background: var(--cream-mid);
+  border-radius: 12px;
+  padding: 14px 14px 12px;
+  box-shadow: 0 18px 42px -12px rgba(192, 57, 43, 0.22),
+    0 4px 14px -4px rgba(28, 25, 23, 0.08),
+    inset 0 0 0 1px rgba(245, 212, 184, 0.6);
+  font-family: var(--sans);
+  animation: audit-org-tip-in 180ms var(--ease-out) both;
+}
+
+@keyframes audit-org-tip-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.audit-org-hover-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.audit-org-hover-avatar,
+.audit-org-cluster-focus-avatar,
+.audit-org-node-detail-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.audit-org-hover-avatar.hue-maroon,
+.audit-org-cluster-focus-avatar.hue-maroon,
+.audit-org-node-detail-avatar.hue-maroon { background: var(--maroon); }
+.audit-org-hover-avatar.hue-coral,
+.audit-org-cluster-focus-avatar.hue-coral,
+.audit-org-node-detail-avatar.hue-coral { background: var(--coral); }
+.audit-org-hover-avatar.hue-orange,
+.audit-org-cluster-focus-avatar.hue-orange,
+.audit-org-node-detail-avatar.hue-orange { background: var(--orange-bright); }
+.audit-org-hover-avatar.hue-ink,
+.audit-org-cluster-focus-avatar.hue-ink,
+.audit-org-node-detail-avatar.hue-ink { background: var(--ink-secondary); }
+
+.audit-org-hover-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.audit-org-hover-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-org-hover-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-tertiary);
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-org-hover-quote {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  margin-bottom: 10px;
+  border-left: 2px solid var(--maroon);
+  padding-left: 10px;
+}
+
+.audit-org-hover-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.audit-org-hover-match {
+  color: var(--maroon);
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.audit-org-hover-arrow { color: var(--ink-quiet); }
+.audit-org-hover-vault { color: var(--green-warm); font-weight: 600; }
+.audit-org-hover-sep { color: var(--ink-quiet); }
+
+.audit-org-hover-cta {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--cream-border);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-tertiary);
+  text-align: right;
+  letter-spacing: 0.02em;
+}
+
+/* ── Cluster focus side rail ──────────────────────────────────── */
+
+.audit-org-cluster-focus {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 92vw);
+  z-index: 40;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 251, 247, 0.96) 0%,
+    rgba(255, 247, 240, 0.92) 100%
+  );
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: -28px 0 60px -20px rgba(192, 57, 43, 0.18),
+    -8px 0 18px -8px rgba(28, 25, 23, 0.08);
+  padding: 32px 28px 24px;
+  overflow-y: auto;
+  font-family: var(--sans);
+  animation: audit-org-rail-in 360ms var(--ease-out) both;
+}
+
+@keyframes audit-org-rail-in {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.audit-org-cluster-focus-head {
+  position: relative;
+  padding-bottom: 22px;
+  margin-bottom: 18px;
+  border-bottom: 1px dashed var(--cream-border);
+}
+
+.audit-org-cluster-focus-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.audit-org-cluster-focus-name {
+  margin: 8px 0 0;
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.audit-org-cluster-focus-desc {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+}
+
+.audit-org-cluster-focus-stats {
+  margin-top: 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-org-cluster-focus-stats em {
+  font-style: normal;
+  color: var(--maroon);
+  font-weight: 600;
+}
+
+.audit-org-cluster-focus-stats .sep { color: var(--ink-quiet); }
+
+.audit-org-cluster-focus-close,
+.audit-org-node-detail-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--cream-elevated);
+  color: var(--ink-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 200ms var(--ease-out), color 200ms var(--ease-out);
+}
+
+.audit-org-cluster-focus-close:hover,
+.audit-org-node-detail-close:hover {
+  background: var(--maroon);
+  color: #fff;
+}
+
+.audit-org-cluster-focus-list-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+  margin-bottom: 8px;
+}
+
+.audit-org-cluster-focus-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-org-cluster-focus-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 10px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  transition: background 180ms var(--ease-out);
+}
+
+.audit-org-cluster-focus-item:hover {
+  background: rgba(192, 57, 43, 0.06);
+}
+
+.audit-org-cluster-focus-item-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.audit-org-cluster-focus-item-quote {
+  font-size: 13.5px;
+  color: var(--ink);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-org-cluster-focus-item-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-tertiary);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-org-cluster-focus-item-arrow {
+  font-family: var(--mono);
+  color: var(--maroon);
+  font-size: 14px;
+  align-self: center;
+  opacity: 0.5;
+  transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+}
+
+.audit-org-cluster-focus-item:hover .audit-org-cluster-focus-item-arrow {
+  opacity: 1;
+  transform: translateX(3px);
+}
+
+/* ── Node detail overlay ──────────────────────────────────────── */
+
+.audit-org-node-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(28, 25, 23, 0.18);
+  backdrop-filter: blur(8px) saturate(0.9);
+  -webkit-backdrop-filter: blur(8px) saturate(0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(24px, 6vh, 96px) clamp(20px, 6vw, 120px);
+  animation: audit-org-detail-in 260ms var(--ease-out) both;
+}
+
+@keyframes audit-org-detail-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.audit-org-node-detail-inner {
+  position: relative;
+  background: var(--cream);
+  border-radius: 18px;
+  width: min(880px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: clamp(28px, 4vw, 56px);
+  box-shadow: 0 36px 80px -20px rgba(192, 57, 43, 0.32),
+    0 8px 28px -8px rgba(28, 25, 23, 0.18);
+  font-family: var(--sans);
+  animation: audit-org-detail-rise 320ms var(--ease-out) both;
+}
+
+@keyframes audit-org-detail-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.audit-org-node-detail-eyebrow {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-org-node-detail-eyebrow .sep { color: var(--ink-quiet); }
+
+.audit-org-node-detail-cluster {
+  color: var(--maroon);
+  font-weight: 600;
+}
+
+.audit-org-node-detail-author {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 18px;
+}
+
+.audit-org-node-detail-avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 13px;
+}
+
+.audit-org-node-detail-author-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.audit-org-node-detail-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.audit-org-node-detail-handle {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-tertiary);
+  margin-top: 2px;
+}
+
+.audit-org-node-detail-quote {
+  margin: 0 0 28px;
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(22px, 2.6vw, 30px);
+  letter-spacing: -0.018em;
+  line-height: 1.18;
+  color: var(--ink);
+  border-left: 3px solid var(--maroon);
+  padding-left: 18px;
+}
+
+.audit-org-node-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(20px, 4vw, 40px);
+  padding-bottom: 28px;
+  margin-bottom: 28px;
+  border-bottom: 1px dashed var(--cream-border);
+}
+
+@media (max-width: 640px) {
+  .audit-org-node-detail-grid { grid-template-columns: 1fr; }
+}
+
+.audit-org-node-detail-col-eyebrow {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+  margin-bottom: 12px;
+}
+
+.audit-org-node-detail-fields {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audit-org-node-detail-fields .row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 14px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.audit-org-node-detail-fields .row.is-block {
+  grid-template-columns: 1fr;
+  background: var(--cream-mid);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.audit-org-node-detail-fields dt {
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.audit-org-node-detail-fields dd {
+  margin: 0;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.audit-org-node-detail-fields .is-output {
+  color: var(--maroon);
+  font-weight: 500;
+}
+
+.audit-org-node-detail-fields .row.is-block dt {
+  margin-bottom: 6px;
+}
+
+.audit-org-node-detail-compare {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 18px;
+  align-items: center;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+}
+
+.audit-org-node-detail-compare .cmp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cmp-col-eyebrow {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.cmp-col-model {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.cmp-col-stat {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.cmp-col-stat em {
+  font-style: normal;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cmp-col.is-vault .cmp-col-model { color: var(--green-warm); font-weight: 600; }
+.cmp-col.is-vault .cmp-col-stat em { color: var(--green-warm); }
+
+.cmp-arrow {
+  font-family: var(--mono);
+  font-size: 22px;
+  color: var(--maroon);
+  font-weight: 600;
+}
+
+.cmp-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--cream-border);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.cmp-summary em {
+  font-style: normal;
+  color: var(--maroon);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.audit-org-node-detail-hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-tertiary);
+  text-align: right;
+}
+
+.audit-org-node-detail-hint kbd {
+  font-family: var(--mono);
+  background: var(--cream-mid);
+  border: 1px solid var(--cream-border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: var(--ink-secondary);
 }
