@@ -42,6 +42,44 @@ cell is logically one row. The `ConvexBootstrapStream` buffers calls in a
 cell as its own row. Result: data model unchanged, wire transport is one
 mutation per ~1K cells (~30 mutations across a 100K run).
 
+## Deployment
+
+**Local dev:**
+```
+npm run convex:dev
+```
+First run prompts for browser auth + project picker, writes
+`CONVEX_DEPLOYMENT` and `CONVEX_URL` to `.env.local`, generates
+`convex/_generated/`, and pushes schema + mutations. Subsequent runs
+are watch-mode hot-push.
+
+Active deployments:
+- **Dev**: `dev:watchful-oriole-309` (`https://watchful-oriole-309.convex.cloud`)
+- **Prod**: `prod:flexible-turtle-311` (`https://flexible-turtle-311.convex.cloud`)
+
+**Production (Vercel build):**
+1. In Vercel project settings, set:
+   - `CONVEX_DEPLOY_KEY` — the prod deploy key from the Convex dashboard (build-time only, secret)
+   - `CONVEX_URL` — `https://flexible-turtle-311.convex.cloud` (runtime, public)
+2. Set the Vercel build command to:
+   ```
+   npx convex deploy --cmd 'npm run build'
+   ```
+   Convex pushes the schema/functions before the UI build runs, so a
+   schema mismatch fails the deploy.
+
+**Manual prod push** (skipping Vercel):
+```
+CONVEX_DEPLOY_KEY=prod:... npx convex deploy
+```
+
+**Writer-side wire:**
+Lane B (and any server-side writer) builds the stream with
+`createConvexAdapter({ url })` from `@compile/stream`, or
+`convexAdapterFromEnv()` if `CONVEX_URL` is exported. This is the
+real `IConvexClientLike` implementation; `MemoryBootstrapStream` stays
+available for tests.
+
 ## Lane C handoff
 
 Lane C imports types from `@compile/schemas` (`BootstrapPhaseDoc`,

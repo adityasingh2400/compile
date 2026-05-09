@@ -17,7 +17,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@compile/schemas": "*"
+    "@compile/schemas": "*",
+    "convex": "^1.38.0"
   },
   "devDependencies": {
     "vitest": "^2.1.4"
