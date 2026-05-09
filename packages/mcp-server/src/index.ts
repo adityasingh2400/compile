@@ -12,7 +12,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { StubNiaClient } from "@compile/nia";
+import { createNiaClient } from "@compile/nia";
 import { MemoryReceiptStore } from "@compile/identifier";
 import {
   MemoryBootstrapStream,
@@ -41,7 +41,10 @@ import {
 } from "./handlers.js";
 import type { McpToolName } from "@compile/schemas";
 
-const nia = new StubNiaClient();
+// Nia (D2). createNiaClient picks RealNiaClient when NIA_API_KEY +
+// NIA_VAULT_ID are both set; otherwise StubNiaClient. The factory keeps
+// offline dev / CI working without keys.
+const nia = createNiaClient();
 const store = new MemoryRequestStore();
 const receipts = new MemoryReceiptStore();
 const bootstrap = new MemoryBootstrapStore();
@@ -62,8 +65,9 @@ const tensorlake: ITensorlakeClient = (() => {
   if (process.env.TENSORLAKE_API_KEY) {
     const real = new RealTensorlakeClient({
       apiKey: process.env.TENSORLAKE_API_KEY,
-      endpoint: process.env.TENSORLAKE_ENDPOINT ?? "https://api.tensorlake.ai",
-      phiModel: process.env.TENSORLAKE_PHI_MODEL ?? "phi-3-mini",
+      endpoint: process.env.TENSORLAKE_ENDPOINT,
+      phiImage: process.env.COMPILE_PHI_IMAGE ?? "compile-phi-mini",
+      phiModel: process.env.COMPILE_PHI_MODEL ?? "phi3:mini",
     });
     return new TensorlakeWithLocalFallback(real, fallback);
   }
