@@ -1,4 +1,5 @@
 import type { CallSiteDescriptor, SyntheticInput } from "@compile/schemas";
+import type { ITensorlakeClient } from "@compile/runtime";
 import { stubFrontierOutput } from "./oracle.js";
 
 /**
@@ -7,10 +8,16 @@ import { stubFrontierOutput } from "./oracle.js";
  * comes in Stage 3 / synthesis). What we DO have is a heuristic prototype
  * that the static priors suggest, plus a Tier-2 prompt-pack on Phi-3-mini.
  *
- * Hackathon stub: the candidate output mirrors the oracle output ~95% of the
- * time and intentionally diverges ~5% (to make the oracle-agreement axis
- * non-trivial). Variability is keyed deterministically by input_id so demo
- * runs are reproducible.
+ * Per ENG_REVIEW.md D1 the Tier-2 path on YELLOW pills MUST run real
+ * Phi-3-mini ("audience can tell when something is mocked"). When the
+ * client receives an ITensorlakeClient, YELLOW inputs are routed through
+ * runPhi; greens stay deterministic (the codified-fn analogue) and reds
+ * keep the high-variance shape divergence the gate is supposed to reject.
+ *
+ * Hackathon stub default (no tensorlake supplied): the candidate output
+ * mirrors the oracle output ~95% of the time and intentionally diverges
+ * ~5% (to make the oracle-agreement axis non-trivial). Variability is
+ * keyed deterministically by input_id so demo runs are reproducible.
  */
 export interface ICandidateClient {
   call(args: {
@@ -34,6 +41,7 @@ function hash32(s: string): number {
 }
 
 export class StubCandidateClient implements ICandidateClient {
+  constructor(private readonly opts: { tensorlake?: ITensorlakeClient } = {}) {}
   async call(args: {
     call_site: CallSiteDescriptor;
     input: SyntheticInput;
@@ -52,6 +60,22 @@ export class StubCandidateClient implements ICandidateClient {
         : args.call_site.priors.pill === "yellow"
           ? "tier_2"
           : "tier_3";
+
+    // YELLOW pills (Tier-2) route through Phi-3-mini when a Tensorlake
+    // client is configured (D1). When absent we fall through to the
+    // inline paraphrase mock so unit tests / Friday harness stay offline.
+    if (tier_assigned === "tier_2" && this.opts.tensorlake) {
+      const phi = await this.opts.tensorlake.runPhi({
+        prompt: phiPromptForCallSite(args.call_site),
+        input: args.input.payload,
+      });
+      return {
+        output: phi.output,
+        tier_assigned,
+        latency_ms: performance.now() - t0,
+        cost_usd: 0.0001, // matches DESIGN.md cost table for Tier-2.
+      };
+    }
     // Inject deterministic divergence keyed by input_id, modeling reality:
     //   - tier_1 (greens): perfectly deterministic. Codified TS function will
     //     match exactly on the holdout — that's the whole point of tier 1.
@@ -81,4 +105,23 @@ export class StubCandidateClient implements ICandidateClient {
     const cost_usd = tier_assigned === "tier_1" ? 0 : tier_assigned === "tier_2" ? 0.0001 : 0.05;
     return { output, tier_assigned, latency_ms, cost_usd };
   }
+}
+
+/**
+ * Build the Phi-3-mini prompt for a Stage-2 candidate call. The prompt has
+ * to be deterministic and grounded in the call site so YELLOW outputs are
+ * consistent across rehearsals. Real prompt-engineering happens in the
+ * synthesizer; for Stage 2 we just need Phi to produce *something
+ * structurally similar* to the frontier oracle so the agreement axis is
+ * meaningful.
+ */
+export function phiPromptForCallSite(cs: CallSiteDescriptor): string {
+  const hint = cs.function_hint ?? "the_function";
+  return [
+    `You are a small language model standing in for a frontier LLM call.`,
+    `Function: ${hint}`,
+    `Excerpt of the original call:`,
+    cs.prompt_excerpt,
+    `Return JSON only. Match the schema implied by the excerpt above.`,
+  ].join("\n");
 }

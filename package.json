@@ -16,7 +16,8 @@
     "dev:mcp": "npm run dev -w @compile/mcp-server",
     "dev:ui": "npm run dev -w @compile/ui",
     "snapshot": "npm run snapshot -w @compile/ui",
-    "harness": "npm run harness -w @compile/synthesizer"
+    "harness": "npm run harness -w @compile/synthesizer",
+    "warm": "npm run build -w @compile/runtime && npm run warm -w @compile/runtime"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

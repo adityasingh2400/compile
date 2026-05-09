@@ -21,7 +21,12 @@ import {
   RETRY_POLICY_BY_REASON,
 } from "@compile/schemas";
 import type { INiaClient } from "@compile/nia";
-import { gate, runCodified } from "@compile/runtime";
+import {
+  gate,
+  runCodified,
+  LocalFakeTensorlakeClient,
+  type ITensorlakeClient,
+} from "@compile/runtime";
 import { validateEnvelope, assembleSpec } from "@compile/synthesizer";
 import {
   type IReceiptStore,
@@ -99,6 +104,17 @@ export interface HandlerDeps {
    * library users (Friday harness, unit tests) don't have to wire one.
    */
   stream?: IBootstrapStream;
+  /**
+   * Tensorlake sandbox client (D1, D6). Used to:
+   *   - run agent-emitted code against the holdout in submit_synthesis
+   *   - host Phi-3-mini for Tier-2 candidate paths in synthetic_confirm
+   *   - host Phi-3-mini for run_codified on tier_2 Vault entries
+   * Production callers pass TensorlakeWithLocalFallback so a sandbox
+   * outage drops to in-process execution per failure mode #2. When
+   * omitted, defaults to LocalFakeTensorlakeClient — fully offline,
+   * deterministic, used by tests + the Friday harness.
+   */
+  tensorlake?: ITensorlakeClient;
   /**
    * Resolves the active run_id. The bootstrap store is the natural home —
    * scan_repo sets it; subsequent handlers reuse it. Defaults to a
@@ -226,6 +242,8 @@ export function buildHandlers(deps: HandlerDeps): Record<
   const resolveCandidate = deps.resolveCandidate ?? defaultResolveCandidate(deps);
   const buildSpecInputs = deps.buildSpecInputs ?? defaultBuildSpecInputs;
   const stream: IBootstrapStream = deps.stream ?? new NoopBootstrapStream();
+  const tensorlake: ITensorlakeClient =
+    deps.tensorlake ?? new LocalFakeTensorlakeClient();
   const runId = (): string => {
     if (deps.runId) return deps.runId();
     let rid = deps.bootstrap.getRunId();
@@ -306,6 +324,7 @@ export function buildHandlers(deps: HandlerDeps): Record<
         nia: deps.nia,
         stream,
         run_id: rid,
+        tensorlake,
       });
       deps.bootstrap.putRun(run);
       // Page 6 → Page 7: constellation freezes, cluster centroids labeled.
@@ -349,6 +368,7 @@ export function buildHandlers(deps: HandlerDeps): Record<
         code: env.code,
         input,
         tier: env.tier === "tier_1" ? "tier_1" : "tier_2",
+        tensorlake,
       });
     },
 
@@ -505,6 +525,7 @@ export function buildHandlers(deps: HandlerDeps): Record<
       const verdict = await gate({
         envelope: validated.envelope,
         holdout: pending.holdout_traces,
+        tensorlake,
       });
       deps.store.delete(request_id);
       if (verdict.verdict === "pass") {
