@@ -1,6 +1,6 @@
 # Test Plan — RealityCI
 
-Last refined: 2026-05-04 (v4 — adds execution/action layer)
+Last refined: 2026-05-06 (v5 — adds self-improving loop tests)
 Branch: main
 Repo: github.com/adityasingh2400/warden
 
@@ -70,6 +70,16 @@ Repo: github.com/adityasingh2400/warden
   - P0 violation → mock emergency dispatch number only, never real 911
   - No acknowledgement before SLA → escalation event created
   - Duplicate acknowledgement → ignored, no double-close
+- **Self-improving loops:**
+  - Loop A: acknowledged violation → `nia sources write` called with correct vault-id and markdown body
+  - Loop A: `formatViolationAsVaultPage` output contains valid wikilink syntax (`[[INC-{id}]] cites [[{rule_id}]]`)
+  - Loop A: after ack, new amber dashed node appears in React Flow graph within 5s (or Convex-direct fallback fires within 1s)
+  - Loop A: loop counter increments to 1 after first ack, 2 after second, does not double-count
+  - Loop A offline: if `nia sources write` unreachable, pre-staged fallback node fires and counter still increments
+  - Loop B: `self_report` event fires 2s after halt ack (not before, not skipped)
+  - Loop B: `formatAgentReportAsVaultPage` output contains typed wikilinks for both `cites` and `applies_to` edges
+  - Loop B: teal node appears in graph after agent ack
+  - Loop B fallback: if Context Sharing `POST /contexts` fails, Vault write still completes and node appears
 
 ## Critical Paths (these MUST work end-to-end)
 
@@ -99,10 +109,14 @@ Repo: github.com/adityasingh2400/warden
 | Severity classifier             | 3     | Unit                            |
 | Action dispatcher               | 5     | Unit + mocked providers         |
 | Acknowledgement tracker         | 3     | Unit                            |
+| Loop A — Vault write            | 2     | Unit (formatVaultPage + nia sources write) |
+| Loop A — node appearance        | 1     | Integration (ack → node within 5s)         |
+| Loop B — agent self-report      | 2     | Unit (self_report + formatAgentReportPage) |
+| Loop counter badge              | 1     | Unit (Convex query)                        |
 | Critical paths (3 scenes)       | 3     | E2E (Playwright)                |
 | Policy graph render             | 2     | E2E                             |
 | Network-off rehearsal           | 1     | Manual checklist                |
-| **Total**                       | **42**| mixed                           |
+| **Total**                       | **48**| mixed                           |
 
 ## Test Implementation Order
 
@@ -110,7 +124,9 @@ P0 first, P1 alongside the corresponding feature, P2 only if buffer:
 
 - **P0 — write before integrating:** verifier state machine (8), policy graph compiler (4), citation resolver (5), severity classifier (3), acknowledgement tracker (3)
 - **P0 — write alongside feature:** YOLO-World wrapper integration (2), Gemini latency cap (1), agent trace player (3), action dispatcher (5)
+- **P0 — Loop A (Day 5):** `formatVaultPage` unit test (1), `nia sources write` integration test (1), loop counter query unit test (1)
 - **P0 — write before rehearsal:** the 3 critical-path E2E specs in Playwright
+- **P1 — Loop B (Day 6):** agent self-report unit tests (2), Loop B integration test (1)
 - **P1 — write before dress rehearsal:** live ingest watcher (2), policy graph render E2E (2)
 - **P0 — manual:** network-off rehearsal checklist signed off the day before the hackathon
 
