@@ -29,7 +29,7 @@ Siemens estimates the world's 500 largest companies lose ~$1.4T/year to unplanne
 4. **Verify.** The verifier checks each event against the policy graph and emits a structured violation with the cited rule.
 5. **Cite.** A Nia Document Agent expands the violation with cross-references, remediation, and the response plan, streamed live.
 6. **Dispatch.** InsForge edge functions fan out the response: voice call, SMS, Slack, email, audit log, escalation timer.
-7. **Adapt.** `nia vault dream` runs overnight, finds new connections, and the graph self-improves.
+7. **Learn.** Every acknowledged violation writes a new Vault page via `nia sources write`. Agent failures write to Nia Context Sharing as procedural memory. The graph grows from its own operation — visibly, during the demo. `nia vault dream` runs overnight and finds connections across all self-generated incidents.
 
 ## Architecture
 
@@ -81,7 +81,7 @@ Live camera        Watched folder         Agent trace player
 
 ## Sponsor Stack
 
-- **Nia / Nozomio** (host, mandatory) — universal `index`, all 4 search modes, `nia_grep`, `nia_read`, `nia_explore`, **Document Agent**, **Data Extraction** (table + detect + engineering), **Vault** with `nia vault dream`, Context Sharing, Local Sync, Connectors (Notion + Slack), Scoped MCP. **~12 distinct Nia capabilities, all load-bearing.**
+- **Nia / Nozomio** (host, mandatory) — universal `index`, all 4 search modes, `nia_grep`, `nia_read`, `nia_explore`, **Document Agent**, **Data Extraction** (table + detect + engineering), **Vault** with `nia vault dream` + **Vault write API** (`nia sources write`), **Context Sharing** (procedural memory for agent failures), Local Sync, Connectors (Notion + Slack), Scoped MCP. **~14 distinct Nia capabilities, all load-bearing.**
 - **Convex** — reactive policy-graph state, Agent Component for the agent-trace thread, websocket streaming deltas, action timeline UI.
 - **InsForge** — Postgres action ledger, edge-function dispatch, role roster, acknowledgements, escalation timers, audit export.
 - **Vercel** — Next.js deploy, edge.
@@ -108,7 +108,7 @@ The combination eliminates the v2 plan's #1 demo-day risk (YOLO mis-detection at
 
 ## Status
 
-Day 1, v4. Design refined. YOLO training cut. Demo pivoted to safety/hazard events. Execution layer added: voice call, SMS, Slack, email, audit log, escalation. Build kickoff: tonight.
+Day 3, v5. Self-improving loops added: violations write themselves to Nia Vault on acknowledgement (Loop A); agent failures write to Nia Context Sharing and Vault (Loop B). Graph grows from its own operation during the demo. 14 Nia capabilities, all load-bearing.
 
 See [`DESIGN.md`](./DESIGN.md) for the full plan and [`DECISIONS.md`](./DECISIONS.md) for the why-of-each-decision.
 

@@ -1,6 +1,6 @@
 # Design: RealityCI — Runtime for Physical Procedures
 
-Last refined: 2026-05-04 (v4 — adds the action layer)
+Last refined: 2026-05-06 (v5 — adds self-improving loops)
 Repo: github.com/adityasingh2400/warden
 Status: APPROVED
 Mode: Builder
@@ -560,13 +560,15 @@ needs them.
 The center of the dashboard is a force-directed React Flow graph. Nodes:
 
 
-| Node type      | Color     | Source                             |
-| -------------- | --------- | ---------------------------------- |
-| Active rule    | gray      | Indexed source (OSHA, SOP, NFPA)   |
-| Violated rule  | red pulse | Verifier flagged it in this run    |
-| Passing rule   | green     | Verifier confirmed compliance      |
-| Prior incident | amber dot | Incident log, edges to cited rules |
-| Equipment      | blue      | Equipment manual node              |
+| Node type               | Color          | Source                                      |
+| ----------------------- | -------------- | ------------------------------------------- |
+| Active rule             | gray           | Indexed source (OSHA, SOP, NFPA)            |
+| Violated rule           | red pulse      | Verifier flagged it in this run             |
+| Passing rule            | green          | Verifier confirmed compliance               |
+| Prior incident          | amber dot      | Incident log, edges to cited rules          |
+| Self-generated incident | amber dashed   | Loop A: written by RealityCI on ack         |
+| Agent self-report       | teal           | Loop B: written by agent on failure ack     |
+| Equipment               | blue           | Equipment manual node                       |
 
 
 Edges:
@@ -751,6 +753,129 @@ of the response, not a separate admin task two hours later.
 
 ---
 
+## Self-Improving Loops
+
+RealityCI v4 detects and dispatches. v5 adds the feedback layer: the system
+learns from every acknowledged violation and agent failure, using Nia as a
+read-write knowledge substrate instead of a read-only one.
+
+**The demo itself is the proof.** By the end of Scene 3, the policy graph has
+2–3 new nodes that didn't exist when Scene 1 started — created from violations
+the judges just watched happen.
+
+**Nia capability additions (v5 brings total to 14):**
+
+| New capability              | API                                              | Where used      |
+| --------------------------- | ------------------------------------------------ | --------------- |
+| Vault write (agent-created) | `nia sources write <vault-id> /path.md --body …` | Loop A, Loop B  |
+| Context Sharing — procedural memory | `POST /contexts` with `memory_type: procedural` | Loop B      |
+
+> **Confirmed from docs.trynia.ai:** `nia sources write` is documented and works
+> via `NIA_API_KEY` env var. JSONL is NOT a supported index format — loops write
+> Vault markdown pages directly, not JSON files.
+
+### Loop A — Violations Write Themselves (P0)
+
+Every acknowledged violation (DTMF `1` received) calls `nia sources write` to
+create a new Vault page. The graph grows from the demo's own operation.
+
+```
+Violation acknowledged
+        │
+        ▼
+formatViolationAsVaultPage(violation, citation) → markdown with typed wikilinks:
+  [[INC-{id}]] cites [[{rule_id}]]
+        │
+        ▼
+nia sources write $NIA_VAULT_ID /incidents/INC-{id}.md --body "..."
+  # /incidents/INC-{id}.md is a Vault namespace path, not a local path
+  # Auth: NIA_API_KEY env var. Confirm exact --help flag on Day 4 spike.
+        │
+        ▼
+nia vault sync  (= POST /v2/vaults/{id}/run, workflow: "sync")
+  # Triggers Local Sync daemon → new node propagates to Convex → React Flow
+  # FALLBACK: if propagation >5s, pre-stage node in Convex directly on ack;
+  # Vault write still happens async. Counter increments immediately.
+        │
+        ▼
+React Flow: new amber dashed node appears
+Loop counter badge increments: "Self-Improvement Events: N (human)"
+```
+
+**Day 4 evening spike (go/no-go gate before any Loop A code):**
+```bash
+nia sources write --help   # confirm exact flag syntax first
+nia sources write $NIA_VAULT_ID /test/spike-001.md \
+  --body "# Test\n[[OSHA-1910.305]] cites [[test-001]]"
+```
+If the node appears in the Vault graph: Loop A is build-ready.
+If it fails: use Day 5 to resolve before writing any Loop A code.
+
+**Demo narration addition (Scene 1, after demoer presses 1):**
+> "The system didn't just dispatch the response — watch the graph. A new
+> incident node just appeared. RealityCI wrote it. Nia indexed it. Tonight,
+> `nia vault dream` will connect it to every similar incident in the Vault."
+
+### Loop B — Agent Self-Annotation (P1, add Day 6 if Loop A is solid)
+
+After Scene 3's agent violation is acknowledged, the scripted agent posts its
+own failure report to both a Vault page and Nia's procedural memory.
+
+```
+Scene 3 halt acknowledged (2s delay — allows halt animation to complete)
+        │
+        ▼
+agent-trace-player.ts emits self_report event:
+  { agent_id: "ship-bot-7", violated_rule: "PACK-2.3",
+    missed_step: "add_packing_material",
+    root_cause: "SOP §2 not in context window",
+    suggested_fix: "Include PACK-SOP §2 in system prompt" }
+        │
+        ├── nia sources write $NIA_VAULT_ID /agent-reports/SHIP-BOT-7-001.md
+        │     Vault page with wikilinks:
+        │     [[SHIP-BOT-7-001]] cites [[PACK-2.3]]
+        │     [[PACK-2.3]] applies_to [[ship-bot-7]]
+        │
+        └── POST /contexts { memory_type: "procedural",
+              title: "apply_label before add_packing_material — PACK-2.3",
+              summary: "ship-bot-7 failed PACK-2.3: SOP §2 not in context." }
+              # FALLBACK: if Context Sharing auth unresolved by Day 6 noon,
+              # ship Vault node only — story still works without the API call
+        │
+        ▼
+React Flow: teal "Agent Self-Report" node appears
+Counter: "Self-Improvement Events: 3 (2 human, 1 agent)"
+```
+
+**Demo narration addition (Scene 3, before outro):**
+> "The agent didn't just get halted. It wrote its own incident report to Nia's
+> memory. Next time any agent runs this procedure, it can query Nia: 'Have I
+> seen this failure before?' and find this report. The system learns from agents
+> — not just humans."
+
+### Loop counter badge
+
+Small badge in the top-right of the dashboard. Driven by a Convex query on the
+new `selfImprovementEvents` table. Zero cost once Loop A exists.
+
+```
+┌──────────────────────────────┐
+│  Self-Improvement Events: 3  │
+│  2 human · 1 agent           │
+└──────────────────────────────┘
+```
+
+### Three-speed self-improvement (narration frame)
+
+1. **Real-time** — every acknowledged violation writes a new Vault page. Visible now.
+2. **Nightly** — `nia vault dream` finds connections across all self-generated incidents.
+3. **Perpetual** — agent failures stored as Nia procedural memory; future agents query it.
+
+**Outro addition (weave in, no extra time):**
+> "…detects, verifies, dispatches, escalates, records, and **learns**. We're RealityCI."
+
+---
+
 ## Network Resilience
 
 EF venue wifi cannot be a hard demo dependency. Pre-cache everything the
@@ -769,6 +894,10 @@ InsForge is unreachable)
 - YOLO-World weights (already local — Ultralytics ships them)
 - Optional: a small local VLM (Llama 3.2 Vision via Ollama) as Gemini-3-
 Flash fallback for the scene-reasoner
+- Loop A fallback: 3 pre-staged self-generated incident nodes in Convex (fire
+on ack if `nia sources write` is unreachable; Vault write retried later)
+- Loop B fallback: agent self-report Vault page pre-written; skip
+`POST /contexts` write if Context Sharing is unreachable
 
 Day-of: turn wifi off, run the full demo. Anything that breaks gets fixed
 before the pitch slot.
@@ -782,20 +911,24 @@ before the pitch slot.
 
 | Module                     | Tests  | Type                         |
 | -------------------------- | ------ | ---------------------------- |
-| Verifier state machine     | 8      | Unit                         |
-| Citation resolver          | 5      | Unit (mocked Nia)            |
-| Policy graph compiler      | 4      | Unit + 1 integration         |
-| Live ingest watcher        | 2      | Integration                  |
-| Agent trace player         | 3      | Unit                         |
-| YOLO-World wrapper         | 2      | Integration (golden frames)  |
-| Gemini-3-Flash latency cap | 1      | Integration (hard 800ms cap) |
-| Severity classifier        | 3      | Unit                         |
-| Action dispatcher          | 5      | Unit + mocked providers      |
-| Acknowledgement tracker    | 3      | Unit                         |
-| Critical paths (3 scenes)  | 3      | E2E (Playwright)             |
-| Policy graph render        | 2      | E2E                          |
-| Network-off rehearsal      | 1      | Manual checklist             |
-| **Total**                  | **42** | mixed                        |
+| Verifier state machine         | 8      | Unit                         |
+| Citation resolver              | 5      | Unit (mocked Nia)            |
+| Policy graph compiler          | 4      | Unit + 1 integration         |
+| Live ingest watcher            | 2      | Integration                  |
+| Agent trace player             | 3      | Unit                         |
+| YOLO-World wrapper             | 2      | Integration (golden frames)  |
+| Gemini-3-Flash latency cap     | 1      | Integration (hard 800ms cap) |
+| Severity classifier            | 3      | Unit                         |
+| Action dispatcher              | 5      | Unit + mocked providers      |
+| Acknowledgement tracker        | 3      | Unit                         |
+| Loop A — Vault write           | 2      | Unit (formatVaultPage + nia sources write) |
+| Loop A — graph node appearance | 1      | Integration (ack → node within 5s)  |
+| Loop B — agent self-report     | 2      | Unit (self_report event + Vault page format) |
+| Loop counter badge             | 1      | Unit (Convex query drives count)    |
+| Critical paths (3 scenes)      | 3      | E2E (Playwright)             |
+| Policy graph render            | 2      | E2E                          |
+| Network-off rehearsal          | 1      | Manual checklist             |
+| **Total**                      | **48** | mixed                        |
 
 
 Critical paths:
@@ -926,6 +1059,39 @@ events into the verifier)
 - **P1** Architecture doc note: live LLM trace is a one-file swap
 (post-hackathon)
 
+### Self-improving loops (v5 additions — insert before Tests)
+
+**Pre-loop gate (Day 4 evening — required before any Loop A code):**
+
+- **P0** Create or locate Nia Vault; store `vault-id` in `.env` as `NIA_VAULT_ID`
+- **P0** Run spike: `nia sources write --help` then `nia sources write $NIA_VAULT_ID /test/spike-001.md --body "# Test\n[[OSHA-1910.305]] cites [[test-001]]"` — confirm node appears in Vault graph. This is a go/no-go gate.
+- **P0** Measure `nia vault sync` propagation latency. If >5s, implement Convex-direct fallback.
+- **P0** Confirm Context Sharing auth: test `POST /contexts` with `memory_type: procedural` — same `NIA_API_KEY` or separate key?
+
+**Loop A (P0 — Day 5):**
+
+- **P0** `selfImprovementEvents` table added to Convex schema
+- **P0** `createSelfImprovementEvent(violation_id, type, vault_page_path)` Convex mutation
+- **P0** `getSelfImprovementCount()` Convex query (drives badge)
+- **P0** `formatViolationAsVaultPage(violation, citation)` — TypeScript function producing markdown with typed wikilinks
+- **P0** Wire acknowledgement: on DTMF `1` received → `createSelfImprovementEvent` → `nia sources write` → `nia vault sync`
+- **P0** React Flow: amber dashed node style for self-generated incidents
+- **P0** Loop counter badge component (top-right, live Convex query)
+- **P0** Unit test: `formatViolationAsVaultPage` produces valid wikilink syntax
+- **P0** Integration test: ack → new amber dashed node in graph within 5s
+- **P0** Offline fallback: pre-stage 3 incident nodes in Convex; fire on ack if `nia sources write` unreachable
+
+**Loop B (P1 — Day 6 if Loop A is solid AND Context Sharing auth resolved):**
+
+- **P1** Add `self_report` event to `agent-trace-player.ts` (fires 2s after halt ack)
+- **P1** `formatAgentReportAsVaultPage(agent_id, violation, root_cause)` function
+- **P1** `nia sources write` call for agent self-report Vault page (`/agent-reports/`)
+- **P1** `POST /contexts` write with `memory_type: procedural` (fallback: skip if auth unresolved by Day 6 noon)
+- **P1** React Flow: teal node style for agent self-reports
+- **P1** Demo script: Scene 3 narration addition for agent self-annotation (~15s)
+- **P1** Unit test: `self_report` event fires and `formatAgentReportAsVaultPage` produces valid output
+- **P1** Offline fallback: agent self-report Vault page pre-written; `POST /contexts` skipped if unreachable
+
 ### Tests
 
 - **P0** 8 verifier unit tests
@@ -935,8 +1101,12 @@ events into the verifier)
 - **P0** 5 action-dispatcher tests with mocked providers
 - **P0** 3 acknowledgement/escalation tests
 - **P0** 3 critical-path E2E tests in Playwright
+- **P0** 2 Loop A unit tests (`formatViolationAsVaultPage`, loop counter query)
+- **P0** 1 Loop A integration test (ack → Vault node within 5s)
 - **P1** 2 ingest watcher integration tests
 - **P1** 3 agent-trace player unit tests
+- **P1** 2 Loop B unit tests (`self_report` event, `formatAgentReportAsVaultPage`)
+- **P1** 1 Loop B integration test (agent ack → teal node within 5s)
 - **P1** Network-off manual checklist signed off
 
 ### Pre-pitch checklist (day-of)
@@ -994,6 +1164,15 @@ The demo is a success if:
   call path (which has a local mock fallback).
 13. Judges leave saying "wait, that was Nia under the hood?" — meaning the
   Nia integration was visible and load-bearing, not invisible plumbing.
+14. After Scene 1 acknowledgement: new amber dashed incident node appears in
+  React Flow graph within 5 seconds of DTMF `1`.
+15. Loop counter increments correctly: 1 after Scene 1, 2 after Scene 2, 3
+  after Scene 3 agent ack.
+16. After Scene 3 agent ack: teal "Agent Self-Report" node appears in graph.
+  *(P1 — only if Loop B ships.)*
+17. After Scene 3 agent ack: Nia Context Sharing has a new procedural memory
+  entry for PACK-2.3 failure within 5 seconds. *(P1 — only if Loop B ships.)*
+18. All self-improvement loop events work offline (pre-staged fallback nodes fire).
 
 ### Non-goals
 

@@ -426,6 +426,49 @@ schedule.
 
 ---
 
+### Decision 16 — Self-Improving Loops via Nia Vault Write API
+
+**What:** On every acknowledged violation, call `nia sources write` to create a
+new Vault markdown page with typed wikilinks. On agent failure ack, write a
+second page under `/agent-reports/` and a Nia Context Sharing entry
+(`memory_type: procedural`). This turns the policy graph into a living
+record that grows during the demo's own operation.
+
+**Why:**
+- Detection + dispatch is observational. Loops make it compound.
+- Judges retain what they see move. A pre-recorded overnight clip
+  (`nia vault dream`) is not enough — the graph must visibly grow in real time.
+- Every acknowledged violation currently throws away signal (who, how fast,
+  what was violated). Writing it to the Vault costs ~20ms and creates a
+  first-class knowledge node.
+- `nia sources write` is documented API (confirmed from docs.trynia.ai). Auth
+  is `NIA_API_KEY`. Path is a Vault namespace path, not a local path.
+- This extends Nia from a read layer to a read+write substrate, directly
+  honoring Arlan's "filesystem as infrastructure" thesis.
+- For agents specifically: the agent writing its own failure report to Nia's
+  procedural memory is the most on-theme "Future of AI Agents" feature in
+  the entire demo. Future agents can query it before acting.
+
+**Validated from docs (2026-05-06):**
+- `nia sources write <vault-id> /path.md --body "..."` — confirmed.
+- Context Sharing with `memory_type: procedural` — confirmed.
+- **JSONL is NOT supported** by universal `index` (CSV/TSV/XLSX only). All
+  loop outputs must be Vault markdown pages, not JSON files.
+
+**Critical pre-gate:** Run `nia sources write --help` spike on Day 4 evening.
+Do not write any Loop A code until the spike confirms the call works and a
+node appears in the Vault graph. This is the go/no-go for all loop work.
+
+**What would change our mind:**
+- If `nia sources write` spike fails and the correct CLI form can't be found
+  within 2 hours: pre-stage the new incident nodes directly in Convex and
+  write to Vault async. The demo story still works; Vault writes become an
+  audit trail rather than the primary trigger.
+- If Loop B Context Sharing auth is unresolved by Day 6 noon: ship Loop B
+  with the Vault page only. The procedural memory write is additive.
+
+---
+
 ## 3. Sponsor Tech Map
 
 For each sponsor: what they do, exactly how we use them, and the 60-
@@ -450,7 +493,9 @@ PDFs, datasets, Slack, Google Drive, and local knowledge sources."
 | Data Extraction (`detect`) | Bounding-box highlighting of violated diagrams in citation card                          |
 | Engineering Extraction | P&ID and equipment-manual diagram parsing at compile time                                    |
 | Vault                  | The policy graph itself: compiled-truth pages with timeline, wikilinks, force-graph view     |
+| Vault write API        | `nia sources write` creates new incident + agent-report pages on acknowledgement (Loop A/B)  |
 | `nia vault dream`      | Pre-recorded clip in Scene 2 finale: graph self-improves overnight                           |
+| Context Sharing        | Procedural memory for agent failures: future agents query before acting (Loop B)             |
 | Local Sync             | Daemon watches incidents folder; real-time file events drive Scene 2                         |
 | Connectors             | Notion (mock safety wiki), Slack (BYOT, `#safety-incidents`)                                 |
 
@@ -461,8 +506,12 @@ catches a violation, we use Nia's `universal` search mode to find the
 matching rule, `nia_read` for the immediate quote, then a Document Agent
 with a JSON schema for cross-references, remediation, and the response
 plan. The incident ingest scene is Local Sync watching a folder. The
-'graph improves overnight' moment is `nia vault dream`. We use 12+
-distinct Nia capabilities. None of them is 'just RAG.'"
+'graph improves overnight' moment is `nia vault dream`. But here's what's
+new: every acknowledged violation calls `nia sources write` to create a
+new Vault page — Nia is a write layer, not just a read layer. And when the
+agent fails in Scene 3, it writes its own failure report to Nia's
+procedural memory via Context Sharing. Future agents can query it before
+acting. We use 14 distinct Nia capabilities. None of them is 'just RAG.'"
 
 ### Convex (strong-fit, real-time backend)
 
