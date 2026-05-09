@@ -20,7 +20,7 @@
  *     advancing the currently-active workflow.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import {
   useRedesignStore,
   type PipelineStage,
@@ -41,145 +41,143 @@ const PIPELINE_STAGES: { id: PipelineStage; label: string; sub: string }[] = [
 ];
 
 /**
- * Per-workflow driver — once a workflow is "armed" (becomes active for
- * the first time), runs the full pipeline timeline. Idempotent: if the
- * driver was previously started for a workflow, it doesn't restart.
+ * Per-workflow driver. Module-level — survives StrictMode double-mounts
+ * and intentionally never cancels mid-flight; the store is the source
+ * of truth so even tab switches keep prior workflows progressing.
+ *
+ * The driver runs each workflow's pipeline END-TO-END once it becomes
+ * active for the first time. After audit, the store auto-activates the
+ * first workflow → it begins running. As soon as it commits the last
+ * cluster, the next workflow auto-arms (so the dashboard cycles through
+ * all three workflows without operator input).
  */
+
+const ARMED_WORKFLOWS = new Set<string>();
+
+async function runWorkflowPipeline(workflowId: string): Promise<void> {
+  const wf = CODIFIABLE_WORKFLOWS.find((w) => w.id === workflowId);
+  if (!wf) return;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const s = () => useRedesignStore.getState();
+
+  // ── SYNTHESIS ─────────────────────────────────────────────────────
+  s().setPipelineStage(workflowId, "synthesis");
+  s().patchSynthesis(workflowId, {
+    nodes_emitted: 0,
+    clustering: true,
+    show_halos: false,
+  });
+  const target = wf.visible_node_count;
+  const stepMs = 32;
+  const totalMs = 4500;
+  const stepCount = Math.ceil(totalMs / stepMs);
+  const perStep = Math.ceil(target / stepCount);
+  let emitted = 0;
+  while (emitted < target) {
+    emitted = Math.min(target, emitted + perStep);
+    s().patchSynthesis(workflowId, { nodes_emitted: emitted });
+    await sleep(stepMs);
+  }
+  await sleep(1300);
+  s().patchSynthesis(workflowId, { clustering: false });
+  await sleep(800);
+  s().patchSynthesis(workflowId, { show_halos: true });
+  await sleep(3000);
+
+  // ── CODIFICATION ──────────────────────────────────────────────────
+  s().setPipelineStage(workflowId, "codification");
+  // Spawn parallel codegen agents. Each runs its own short status
+  // walk: queued → analyzing → synthesizing → validating → committing.
+  const promises: Promise<void>[] = [];
+  for (let i = 0; i < wf.clusters.length; i++) {
+    const cluster = wf.clusters[i]!;
+    const startDelay = 280 + i * 180;
+    promises.push(
+      (async () => {
+        await sleep(startDelay);
+        s().startCodifyCluster(workflowId, cluster.cluster_id);
+        // Drive the status progress as a chars counter — same shape so
+        // the existing setCodeProgress action works. We map progress
+        // to phases on the render side:
+        //   0–0.25 analyzing · 0.25–0.55 synthesizing · 0.55–0.85
+        //   validating · 0.85–1.0 committing
+        const totalSteps = 100;
+        const totalMs = 2700 + i * 140;
+        const tick = totalMs / totalSteps;
+        for (let p = 1; p <= totalSteps; p++) {
+          s().setCodeProgress(workflowId, cluster.cluster_id, p);
+          await sleep(tick);
+        }
+        await sleep(280);
+        s().commitClusterToVault(workflowId, cluster.cluster_id);
+      })(),
+    );
+  }
+  await Promise.all(promises);
+  await sleep(1500);
+
+  // ── PRODUCTION ────────────────────────────────────────────────────
+  s().setPipelineStage(workflowId, "production");
+  s().patchProduction(workflowId, {
+    active: true,
+    vault_calls: 0,
+    frontier_calls: 0,
+    dollars_saved: 0,
+  });
+  const startTs = performance.now();
+  const cyclesPerSec = wf.production.calls_per_minute / 60;
+  const dollarsPerSec = wf.production.dollars_saved_per_minute / 60;
+  // Run production for ~6s, then auto-advance to the next workflow.
+  const runForMs = 6000;
+  while (performance.now() - startTs < runForMs) {
+    const elapsed = (performance.now() - startTs) / 1000;
+    const ease = Math.min(1, elapsed / 1.2);
+    const total = cyclesPerSec * elapsed * ease;
+    const vault = Math.floor(total * wf.production.vault_share);
+    const frontier = Math.floor(total * wf.production.frontier_share);
+    const dollars = dollarsPerSec * elapsed * ease;
+    s().patchProduction(workflowId, {
+      vault_calls: vault,
+      frontier_calls: frontier,
+      dollars_saved: dollars,
+    });
+    await sleep(140);
+  }
+
+  // ── AUTO-ADVANCE TO NEXT WORKFLOW ─────────────────────────────────
+  const idx = CODIFIABLE_WORKFLOWS.findIndex((w) => w.id === workflowId);
+  const next = CODIFIABLE_WORKFLOWS[idx + 1];
+  if (next) {
+    s().setActiveWorkflow(next.id);
+  } else {
+    // Last workflow — keep production looping forever (steady state).
+    while (true) {
+      const elapsed = (performance.now() - startTs) / 1000;
+      const total = cyclesPerSec * elapsed;
+      const vault = Math.floor(total * wf.production.vault_share);
+      const frontier = Math.floor(total * wf.production.frontier_share);
+      const dollars = dollarsPerSec * elapsed;
+      s().patchProduction(workflowId, {
+        vault_calls: vault,
+        frontier_calls: frontier,
+        dollars_saved: dollars,
+      });
+      await sleep(220);
+    }
+  }
+}
+
 export function useWorkflowDriver(): void {
   const activeId = useRedesignStore((s) => s.active_workflow_id);
-  const stage = useRedesignStore((s) =>
-    activeId ? s.workflows[activeId]?.pipeline ?? "synthesis" : "synthesis",
-  );
-  const setPipelineStage = useRedesignStore((s) => s.setPipelineStage);
-  const patchSynthesis = useRedesignStore((s) => s.patchSynthesis);
-  const patchProduction = useRedesignStore((s) => s.patchProduction);
-  const startCodifyCluster = useRedesignStore((s) => s.startCodifyCluster);
-  const setCodeProgress = useRedesignStore((s) => s.setCodeProgress);
-  const commitClusterToVault = useRedesignStore((s) => s.commitClusterToVault);
-
-  const armed = useRef<Set<string>>(new Set());
-
   useEffect(() => {
     if (!activeId) return;
-    if (armed.current.has(activeId)) return;
-    armed.current.add(activeId);
-
-    const wf = CODIFIABLE_WORKFLOWS.find((w) => w.id === activeId);
-    if (!wf) return;
-
-    let cancelled = false;
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-    (async () => {
-      // ── SYNTHESIS ───────────────────────────────────────────────
-      setPipelineStage(activeId, "synthesis");
-      patchSynthesis(activeId, {
-        nodes_emitted: 0,
-        clustering: true,
-        show_halos: false,
-      });
-      // Spawn nodes in batches over ~5s.
-      const target = wf.visible_node_count;
-      const stepMs = 32;
-      const totalMs = 5000;
-      const stepCount = Math.ceil(totalMs / stepMs);
-      const perStep = Math.ceil(target / stepCount);
-      let emitted = 0;
-      while (emitted < target) {
-        if (cancelled) return;
-        emitted = Math.min(target, emitted + perStep);
-        patchSynthesis(activeId, { nodes_emitted: emitted });
-        await sleep(stepMs);
-      }
-      // Settle and reveal halos.
-      await sleep(1700);
-      if (cancelled) return;
-      patchSynthesis(activeId, { clustering: false });
-      await sleep(900);
-      if (cancelled) return;
-      patchSynthesis(activeId, { show_halos: true });
-      await sleep(2400);
-      if (cancelled) return;
-
-      // ── CODIFICATION ────────────────────────────────────────────
-      setPipelineStage(activeId, "codification");
-      // Stagger codegen agent spawn — every 250ms the next cluster
-      // begins. They type in parallel; finish times stagger naturally.
-      const promises: Promise<void>[] = [];
-      for (let i = 0; i < wf.clusters.length; i++) {
-        const cluster = wf.clusters[i]!;
-        const startDelay = 360 + i * 240;
-        promises.push(
-          (async () => {
-            await sleep(startDelay);
-            if (cancelled) return;
-            startCodifyCluster(activeId, cluster.cluster_id);
-            const code = cluster.codified_handler;
-            const totalChars = code.length;
-            const typeMs = 4200 + i * 220;
-            const tick = 16;
-            const charsPerTick = Math.max(
-              1,
-              Math.ceil(totalChars / (typeMs / tick)),
-            );
-            let revealed = 0;
-            while (revealed < totalChars) {
-              if (cancelled) return;
-              revealed = Math.min(totalChars, revealed + charsPerTick);
-              setCodeProgress(activeId, cluster.cluster_id, revealed);
-              await sleep(tick);
-            }
-            // Brief settle, then commit to vault.
-            await sleep(600);
-            if (cancelled) return;
-            commitClusterToVault(activeId, cluster.cluster_id);
-          })(),
-        );
-      }
-      await Promise.all(promises);
-      if (cancelled) return;
-      await sleep(1700);
-      if (cancelled) return;
-
-      // ── PRODUCTION ──────────────────────────────────────────────
-      setPipelineStage(activeId, "production");
-      patchProduction(activeId, {
-        active: true,
-        vault_calls: 0,
-        frontier_calls: 0,
-        dollars_saved: 0,
-      });
-      // Ramp counters up over ~10s, then keep them ticking.
-      const startTs = performance.now();
-      const cyclesPerSec = wf.production.calls_per_minute / 60;
-      const dollarsPerSec = wf.production.dollars_saved_per_minute / 60;
-      while (!cancelled) {
-        const elapsed = (performance.now() - startTs) / 1000;
-        // Soft ease-in over the first 1.5s.
-        const ease = Math.min(1, elapsed / 1.5);
-        const total = cyclesPerSec * elapsed * ease;
-        const vault = Math.floor(total * wf.production.vault_share);
-        const frontier = Math.floor(total * wf.production.frontier_share);
-        const dollars = dollarsPerSec * elapsed * ease;
-        patchProduction(activeId, {
-          vault_calls: vault,
-          frontier_calls: frontier,
-          dollars_saved: dollars,
-        });
-        await sleep(140);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // We intentionally re-run the driver only when the *active workflow*
-    // changes, not when its pipeline stage advances (the inner async
-    // walks the stages itself).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (ARMED_WORKFLOWS.has(activeId)) return;
+    ARMED_WORKFLOWS.add(activeId);
+    runWorkflowPipeline(activeId).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error("[workflow-driver] failed", err);
+    });
   }, [activeId]);
-
-  void stage;
 }
 
 // ─────────────────────────────────────────────────────────────────────
