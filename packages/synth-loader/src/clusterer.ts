@@ -44,6 +44,22 @@ export class OnlineClusterer {
   size(): number {
     return this.buckets.size;
   }
+
+  /**
+   * O(K) cheap proxy for schema_stability — the share of the dominant
+   * shape signature. Used for live_metrics emits during runStage2 so the
+   * Page-6 chrome can tick a stability gauge without re-walking every
+   * candidate output every interval. The exact stability score is still
+   * computed at run completion.
+   */
+  dominantShare(): number {
+    if (this.total === 0) return 0;
+    let max = 0;
+    for (const v of this.buckets.values()) {
+      if (v.ids.length > max) max = v.ids.length;
+    }
+    return max / this.total;
+  }
 }
 
 export function shapeSignature(v: unknown): string {
