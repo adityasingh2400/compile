@@ -250,7 +250,7 @@ Three issues. One resolved (D6, Phi cold start). Two new from the architectural 
 
 ## What Already Exists
 
-Rashaab scaffolded the monorepo on 2026-05-07 evening. Existing packages:
+Rishab scaffolded the monorepo on 2026-05-07 evening. Existing packages:
 - `packages/schemas` — shared Zod schemas
 - `packages/mcp-server` — MCP server scaffold + in-memory store
 - `packages/synthesizer` — synthesizer assemble + train/val/holdout split + prompt template + envelope validator
