@@ -10,9 +10,14 @@ import {
   SubmitSynthesisInput,
   EstimateSavingsInput,
   SubmitSynthesisOutput,
+  ScanRepoInput,
+  SyntheticConfirmInput,
   type SynthesisSpec,
   type Cluster,
   type Trace,
+  type CallSiteDescriptor,
+  type SyntheticRun,
+  type ScanReport,
   RETRY_POLICY_BY_REASON,
 } from "@compile/schemas";
 import type { INiaClient } from "@compile/nia";
@@ -23,15 +28,55 @@ import {
   runPipeline,
   type CandidateCluster,
 } from "@compile/identifier";
+import { scanRepo } from "@compile/scanner";
+import { runStage2 } from "@compile/synth-loader";
 import type { z } from "zod";
 import type { IRequestStore } from "./store.js";
 
 type SubmitOutput = z.infer<typeof SubmitSynthesisOutput>;
 
+/**
+ * v7 bootstrap state. Stage-1 scans and Stage-2 synthetic-confirmation runs
+ * land here so request_synthesis / list_codify_candidates can read from the
+ * code-first path, not just the receipt-based proxy path.
+ */
+export interface IBootstrapStore {
+  putScan(report: ScanReport): void;
+  getScan(): ScanReport | undefined;
+  getCallSite(call_site_id: string): CallSiteDescriptor | undefined;
+  putRun(run: SyntheticRun): void;
+  getRun(call_site_id: string): SyntheticRun | undefined;
+  allRuns(): SyntheticRun[];
+}
+
+export class MemoryBootstrapStore implements IBootstrapStore {
+  private scan?: ScanReport;
+  private readonly runs = new Map<string, SyntheticRun>();
+  putScan(r: ScanReport): void {
+    this.scan = r;
+  }
+  getScan(): ScanReport | undefined {
+    return this.scan;
+  }
+  getCallSite(id: string): CallSiteDescriptor | undefined {
+    return this.scan?.call_sites.find((c) => c.call_site_id === id);
+  }
+  putRun(r: SyntheticRun): void {
+    this.runs.set(r.call_site_id, r);
+  }
+  getRun(id: string): SyntheticRun | undefined {
+    return this.runs.get(id);
+  }
+  allRuns(): SyntheticRun[] {
+    return [...this.runs.values()];
+  }
+}
+
 export interface HandlerDeps {
   nia: INiaClient;
   store: IRequestStore;
   receipts: IReceiptStore;
+  bootstrap: IBootstrapStore;
   /**
    * Resolves a cluster_id to the candidate (cluster + receipts) the
    * pipeline produced. Defaults to running the pipeline live; tests/fixtures
@@ -54,8 +99,50 @@ export interface HandlerDeps {
 
 function defaultResolveCandidate(deps: HandlerDeps) {
   return async (cluster_id: string): Promise<CandidateCluster | null> => {
+    // First check the v7 bootstrap path: every Stage-2 run becomes a
+    // candidate keyed by `cl_<call_site_id>`.
+    for (const run of deps.bootstrap.allRuns()) {
+      if (`cl_${run.call_site_id}` === cluster_id) {
+        return runToCandidate(run, deps.bootstrap.getCallSite(run.call_site_id));
+      }
+    }
+    // Fall back to the receipt-based proxy pipeline.
     const candidates = runPipeline({ receipts: deps.receipts.all() });
     return candidates.find((c) => c.cluster.cluster_id === cluster_id) ?? null;
+  };
+}
+
+function runToCandidate(
+  run: SyntheticRun,
+  cs: CallSiteDescriptor | undefined,
+): CandidateCluster {
+  const cluster: Cluster = {
+    cluster_id: `cl_${run.call_site_id}`,
+    cluster_signature: run.call_site_id,
+    template_ids: [run.call_site_id],
+    trace_count: run.preserved_traces.length,
+    axis_scores: run.axis_scores,
+    passes_synthesis_gate: run.passes_synthesis_gate,
+  };
+  return {
+    cluster,
+    receipts: run.preserved_traces.map((t, i) => ({
+      call_id: `synth_${run.run_id}_${i}`,
+      timestamp: new Date().toISOString(),
+      agent_id: "stage2-synthetic",
+      prompt: cs?.prompt_excerpt ?? cs?.function_hint ?? run.call_site_id,
+      tool_schemas: [],
+      input: t.input,
+      output: t.output,
+      tokens_in: 0,
+      tokens_out: 0,
+      cost_usd: 0.05,
+      latency_ms: 0,
+      model: "synthetic-stub",
+    })),
+    sample_prompt: cs?.prompt_excerpt ?? cs?.function_hint ?? run.call_site_id,
+    projected_annual_savings_usd: run.axis_scores.economic_value.annual_savings_usd,
+    passes_gate: run.passes_synthesis_gate,
   };
 }
 
@@ -111,6 +198,47 @@ export function buildHandlers(deps: HandlerDeps): Record<
   const buildSpecInputs = deps.buildSpecInputs ?? defaultBuildSpecInputs;
 
   return {
+    "compile.scan_repo": async (raw): Promise<ScanReport> => {
+      const { repo_path } = ScanRepoInput.parse(raw);
+      const report = await scanRepo(repo_path);
+      deps.bootstrap.putScan(report);
+      // Eagerly write Stage-1 RED sites to negative Vault per D8 / D11 so
+      // routing skips synthesis on them next time.
+      for (const cs of report.call_sites) {
+        if (cs.priors.pill === "red") {
+          await deps.nia.vaultWrite({
+            kind: "negative",
+            cluster_signature: cs.call_site_id,
+            reason: "low_static_prior",
+            retry_policy: RETRY_POLICY_BY_REASON.low_static_prior,
+            trace_count_at_decision: 0,
+            created_at: new Date().toISOString(),
+          });
+        }
+      }
+      return report;
+    },
+
+    "compile.synthetic_confirm": async (raw): Promise<SyntheticRun> => {
+      const { call_site_id, total_calls, oracle_fraction, worker_count } =
+        SyntheticConfirmInput.parse(raw);
+      const cs = deps.bootstrap.getCallSite(call_site_id);
+      if (!cs) {
+        throw new Error(
+          `synthetic_confirm: call_site ${call_site_id} not found; run scan_repo first`,
+        );
+      }
+      const run = await runStage2({
+        call_site: cs,
+        total_calls,
+        oracle_fraction,
+        worker_count,
+        nia: deps.nia,
+      });
+      deps.bootstrap.putRun(run);
+      return run;
+    },
+
     "compile.observe_call": async (raw) => {
       const r = ObserveCallInput.parse(raw);
       deps.receipts.put(r);
@@ -148,9 +276,18 @@ export function buildHandlers(deps: HandlerDeps): Record<
 
     "compile.list_codify_candidates": async (raw) => {
       const { limit } = ListCandidatesInput.parse(raw);
-      const ranked = runPipeline({ receipts: deps.receipts.all() });
+      // v7: blend Stage-2 synthetic candidates (bootstrap) with receipt-based
+      // proxy candidates. Both paths feed the 90-second report panel.
+      const stage2 = deps.bootstrap
+        .allRuns()
+        .filter((r) => r.passes_synthesis_gate)
+        .map((r) => runToCandidate(r, deps.bootstrap.getCallSite(r.call_site_id)));
+      const proxy = runPipeline({ receipts: deps.receipts.all() });
+      const merged = [...stage2, ...proxy].sort(
+        (a, b) => b.projected_annual_savings_usd - a.projected_annual_savings_usd,
+      );
       return {
-        candidates: ranked.slice(0, limit).map((c) => ({
+        candidates: merged.slice(0, limit).map((c) => ({
           ...c.cluster,
           projected_annual_savings_usd: c.projected_annual_savings_usd,
           sample_prompt: c.sample_prompt,
@@ -304,6 +441,10 @@ function derivePromptSignature(
 }
 
 export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
+  "compile.scan_repo":
+    "Stage 1 (v7 bootstrap): walk the repo, find LLM call sites, compute static priors. Returns ranked sites with red/yellow/green pills.",
+  "compile.synthetic_confirm":
+    "Stage 2 (v7 bootstrap): fire 100K synthetic calls per candidate through the worker grid. Returns axis scores + tier mix + clusters.",
   "compile.observe_call": "Log an LLM call receipt to the identification pipeline.",
   "compile.find_function":
     "Three-state lookup against Nia Vault: positive hit / negative hit / unknown.",

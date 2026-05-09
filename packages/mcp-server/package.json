@@ -50,6 +50,8 @@
     "@compile/identifier": "*",
     "@compile/runtime": "*",
     "@compile/synthesizer": "*",
+    "@compile/scanner": "*",
+    "@compile/synth-loader": "*",
     "tsup": "^8.3.0",
     "typescript": "^5.6.3"
   }

@@ -6,6 +6,8 @@ import {
   SynthesisEnvelopeSchema,
 } from "./synthesis.js";
 import { VaultLookupResultSchema } from "./vault.js";
+import { ScanReportSchema } from "./scanner.js";
+import { SyntheticRunSchema } from "./synthload.js";
 
 /**
  * I/O schemas for the 7 MCP tools (DESIGN.md lines 109–119).
@@ -86,8 +88,31 @@ export const EstimateSavingsOutput = z.object({
   break_even_hits: z.number().int().nonnegative(),
 });
 
+/* 8. compile.scan_repo(path) — v7 Stage 1 */
+export const ScanRepoInput = z.object({
+  repo_path: z.string(),
+});
+export const ScanRepoOutput = ScanReportSchema;
+
+/* 9. compile.synthetic_confirm(call_site_id, n=100k) — v7 Stage 2 */
+export const SyntheticConfirmInput = z.object({
+  call_site_id: z.string(),
+  total_calls: z.number().int().positive().default(100_000),
+  oracle_fraction: z.number().min(0).max(1).default(0.01),
+  worker_count: z.number().int().positive().default(64),
+});
+export const SyntheticConfirmOutput = SyntheticRunSchema;
+
 /** Single source of truth for the MCP tool registry. */
 export const MCP_TOOLS = {
+  "compile.scan_repo": {
+    input: ScanRepoInput,
+    output: ScanRepoOutput,
+  },
+  "compile.synthetic_confirm": {
+    input: SyntheticConfirmInput,
+    output: SyntheticConfirmOutput,
+  },
   "compile.observe_call": {
     input: ObserveCallInput,
     output: ObserveCallOutput,

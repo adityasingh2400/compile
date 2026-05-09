@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { StubNiaClient } from "@compile/nia";
 import { MemoryReceiptStore } from "@compile/identifier";
 import { MemoryRequestStore } from "../src/store.js";
-import { buildHandlers } from "../src/handlers.js";
+import { buildHandlers, MemoryBootstrapStore } from "../src/handlers.js";
 import type { Receipt } from "@compile/schemas";
 
 function mkReceipt(i: number, prompt: string, input: unknown, output: unknown): Receipt {
@@ -52,13 +52,15 @@ describe("MCP handlers", () => {
   let nia: StubNiaClient;
   let store: MemoryRequestStore;
   let receipts: MemoryReceiptStore;
+  let bootstrap: MemoryBootstrapStore;
   let h: ReturnType<typeof buildHandlers>;
 
   beforeEach(() => {
     nia = new StubNiaClient();
     store = new MemoryRequestStore();
     receipts = new MemoryReceiptStore();
-    h = buildHandlers({ nia, store, receipts });
+    bootstrap = new MemoryBootstrapStore();
+    h = buildHandlers({ nia, store, receipts, bootstrap });
   });
 
   it("observe_call appends to receipt store", async () => {
