@@ -42,6 +42,15 @@ export interface INiaClient {
   }): Promise<SyntheticInput[]>;
 }
 
+export { RealNiaClient } from "./real-client.js";
+export { createNiaClient } from "./factory.js";
+export {
+  generateSeeds,
+  generateSeedsViaDocumentAgent,
+  loadLocalCorpus,
+} from "./seed-generator.js";
+export type { CorpusDoc, SeedInput, GenerateOptions } from "./seed-generator.js";
+
 export class StubNiaClient implements INiaClient {
   private readonly bySignature = new Map<
     string,
