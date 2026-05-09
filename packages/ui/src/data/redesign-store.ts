@@ -161,7 +161,7 @@ const blankWorkflow = (): WorkflowSlice => ({
 });
 
 export interface RedesignState {
-  ui_stage: "audit" | "workspace";
+  ui_stage: "landing" | "audit" | "workspace";
   audit: AuditState;
   active_workflow_id: string | null;
   workflows: Record<string, WorkflowSlice>;
@@ -169,7 +169,7 @@ export interface RedesignState {
   nia: NiaStatus;
 
   // Actions
-  setUiStage(stage: "audit" | "workspace"): void;
+  setUiStage(stage: "landing" | "audit" | "workspace"): void;
   setAuditPhase(phase: AuditPhase): void;
   bumpBootLines(): void;
   setFilesScanned(n: number): void;
@@ -230,7 +230,7 @@ const initialNia = (): NiaStatus => ({
 });
 
 export const useRedesignStore = create<RedesignState>((set) => ({
-  ui_stage: "audit",
+  ui_stage: "landing",
   audit: initialAudit(),
   active_workflow_id: CODIFIABLE_WORKFLOWS[0]?.id ?? null,
   workflows: initialWorkflows(),
@@ -376,7 +376,7 @@ export const useRedesignStore = create<RedesignState>((set) => ({
     set((s) => ({ nia: { ...s.nia, ...patch } })),
   resetAll: () =>
     set((s) => ({
-      ui_stage: "audit",
+      ui_stage: "landing",
       audit: initialAudit(),
       active_workflow_id: CODIFIABLE_WORKFLOWS[0]?.id ?? null,
       workflows: initialWorkflows(),

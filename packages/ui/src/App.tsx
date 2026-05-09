@@ -29,6 +29,7 @@ import {
 } from "./data/redesign-store.js";
 import { CODIFIABLE_WORKFLOWS } from "./data/workflows.js";
 import { AuditStage, resetAuditDriver } from "./redesign/AuditStage.js";
+import { LandingPage } from "./redesign/LandingPage.js";
 import { Workspace, resetWorkflowDriver } from "./redesign/Workspace.js";
 import { useTensorlakeStatus } from "./redesign/useTensorlakeStatus.js";
 
@@ -123,12 +124,18 @@ export function App(): JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, [setActiveWorkflow, setPipelineStage, resetAll]);
 
+  const showLanding = stage === "landing";
   const showAudit = stage === "audit" || auditPhase === "transition";
   const showWorkspace = stage === "workspace";
   const folding = auditPhase === "transition";
 
   return (
     <div className="rd-app">
+      {showLanding ? (
+        <div className="rd-landing-layer">
+          <LandingPage />
+        </div>
+      ) : null}
       {showAudit ? (
         <div className={`rd-audit-layer ${folding ? "folding-out" : ""}`}>
           <AuditStage />
@@ -139,6 +146,7 @@ export function App(): JSX.Element {
           <Workspace />
         </div>
       ) : null}
+      {showLanding ? null : (
       <div className="rd-hotkeys">
         <span>tabs</span>
         <kbd>1</kbd>
@@ -157,6 +165,7 @@ export function App(): JSX.Element {
         <span>reset</span>
         <kbd>r</kbd>
       </div>
+      )}
     </div>
   );
 }

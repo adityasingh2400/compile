@@ -7257,3 +7257,453 @@ button {
   from { opacity: 0; transform: translateY(-2px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ─────────────────────────────────────────────────────────────────
+ * Landing / install page (rd-landing)
+ *
+ * Claude-style: warm cream backdrop, generous whitespace, serif-feel
+ * display headline (Clash Display), single hero install command with
+ * copy button, primary "See it in action" CTA that advances to audit.
+ * ────────────────────────────────────────────────────────────────*/
+
+.rd-landing-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--cream);
+  overflow-y: auto;
+  animation: rd-landing-fade-in 480ms var(--ease-out) both;
+}
+
+@keyframes rd-landing-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.rd-landing {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 28px clamp(28px, 6vw, 88px) 36px;
+  color: var(--ink);
+  font-family: var(--sans);
+  isolation: isolate;
+}
+
+.rd-landing-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(192, 57, 43, 0.06) 1px,
+    transparent 0
+  );
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse at 50% 30%, black 30%, transparent 75%);
+  z-index: -1;
+}
+
+.rd-landing-glow {
+  position: absolute;
+  top: -20%;
+  right: -10%;
+  width: 60vw;
+  height: 60vw;
+  max-width: 900px;
+  max-height: 900px;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    rgba(255, 159, 67, 0.18) 0%,
+    rgba(192, 57, 43, 0.08) 35%,
+    transparent 65%
+  );
+  filter: blur(8px);
+  z-index: -1;
+}
+
+.rd-landing-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.rd-landing-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.rd-landing-mark-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--maroon);
+  box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.15);
+  animation: rd-landing-pulse 2.4s var(--ease-out) infinite;
+}
+
+@keyframes rd-landing-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.15); }
+  50% { box-shadow: 0 0 0 8px rgba(192, 57, 43, 0.04); }
+}
+
+.rd-landing-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.rd-landing-nav a {
+  color: var(--ink-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 1px;
+  transition: color 160ms var(--ease-out), border-color 160ms var(--ease-out);
+}
+
+.rd-landing-nav a:hover {
+  color: var(--maroon);
+  border-bottom-color: var(--maroon);
+}
+
+.rd-landing-nav-sep { color: var(--ink-quiet); }
+.rd-landing-nav-tag { color: var(--ink-tertiary); }
+
+.rd-landing-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  max-width: 1080px;
+  margin: 0 auto;
+  width: 100%;
+  padding: clamp(40px, 9vh, 96px) 0 64px;
+}
+
+.rd-landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px 7px 11px;
+  border: 1px solid var(--cream-border);
+  background: var(--cream-mid);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  box-shadow: var(--shadow-sm);
+  animation: rd-landing-rise 720ms var(--ease-out) both;
+}
+
+.rd-landing-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green-warm);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+}
+
+.rd-landing-title {
+  margin: 22px 0 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: clamp(44px, 7.4vw, 88px);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  animation: rd-landing-rise 760ms 60ms var(--ease-out) both;
+  max-width: 14ch;
+}
+
+.rd-landing-title-em {
+  font-family: var(--accent-font);
+  font-style: italic;
+  font-weight: 500;
+  color: var(--maroon);
+}
+
+.rd-landing-sub {
+  margin: 24px 0 0;
+  max-width: 56ch;
+  font-size: clamp(16px, 1.4vw, 19px);
+  line-height: 1.55;
+  color: var(--ink-secondary);
+  animation: rd-landing-rise 800ms 120ms var(--ease-out) both;
+}
+
+.rd-landing-sub strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.rd-landing-install {
+  margin-top: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 720px;
+  animation: rd-landing-rise 840ms 180ms var(--ease-out) both;
+}
+
+.rd-landing-install-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-tertiary);
+  padding-left: 4px;
+}
+
+.rd-landing-install-prompt {
+  color: var(--maroon);
+  font-weight: 600;
+}
+
+.rd-landing-install-cmd {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 18px 18px 18px 22px;
+  border-radius: 14px;
+  background: var(--cream-mid);
+  border: 1px solid var(--cream-border);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 16px;
+  color: var(--ink);
+  box-shadow: var(--shadow-md);
+  transition: border-color 200ms var(--ease-out),
+    transform 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out);
+}
+
+.rd-landing-install-cmd:hover {
+  border-color: var(--cream-border-bright);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lg);
+}
+
+.rd-landing-install-cmd:focus-visible {
+  outline: 2px solid var(--maroon);
+  outline-offset: 3px;
+}
+
+.rd-landing-install-cmd code {
+  font-family: var(--mono);
+  font-size: 16px;
+  color: var(--ink);
+  background: transparent;
+  padding: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rd-landing-install-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--cream-elevated);
+  border: 1px solid var(--cream-border);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-secondary);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+
+.rd-landing-install-cmd.is-copied .rd-landing-install-copy {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--green-warm);
+  border-color: rgba(22, 163, 74, 0.3);
+}
+
+.rd-landing-cta-row {
+  margin-top: 28px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  animation: rd-landing-rise 880ms 240ms var(--ease-out) both;
+}
+
+.rd-landing-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 22px;
+  border-radius: 10px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 200ms var(--ease-out);
+}
+
+.rd-landing-cta.primary {
+  background: var(--maroon);
+  color: #fff;
+  box-shadow: 0 8px 24px -8px rgba(192, 57, 43, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.rd-landing-cta.primary:hover {
+  background: var(--maroon-deep);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px -8px rgba(192, 57, 43, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.rd-landing-cta.primary:focus-visible {
+  outline: 2px solid var(--maroon);
+  outline-offset: 3px;
+}
+
+.rd-landing-cta.ghost {
+  background: transparent;
+  color: var(--ink-secondary);
+  border-color: var(--cream-border);
+}
+
+.rd-landing-cta.ghost:hover {
+  color: var(--ink);
+  border-color: var(--cream-border-bright);
+  background: var(--cream-mid);
+}
+
+.rd-landing-cta-arrow {
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 200ms var(--ease-out);
+}
+
+.rd-landing-cta.primary:hover .rd-landing-cta-arrow {
+  transform: translateX(3px);
+}
+
+.rd-landing-cta-hint {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-tertiary);
+  margin-left: 6px;
+}
+
+.rd-landing-cta-hint kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--cream-mid);
+  border: 1px solid var(--cream-border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-secondary);
+  margin: 0 2px;
+}
+
+.rd-landing-stack {
+  list-style: none;
+  margin: 64px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  width: 100%;
+  max-width: 880px;
+  border-top: 1px solid var(--cream-border);
+  padding-top: 28px;
+  animation: rd-landing-rise 920ms 320ms var(--ease-out) both;
+}
+
+.rd-landing-stack li {
+  display: flex;
+  gap: 12px;
+  padding: 14px 14px 14px 4px;
+}
+
+.rd-landing-stack-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--maroon);
+  letter-spacing: 0.06em;
+  margin-top: 3px;
+}
+
+.rd-landing-stack h3 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.rd-landing-stack p {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+}
+
+.rd-landing-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-tertiary);
+  text-transform: uppercase;
+  padding-top: 24px;
+  border-top: 1px solid var(--cream-border);
+  margin-top: 48px;
+}
+
+.rd-landing-foot-sep { color: var(--ink-quiet); }
+
+@keyframes rd-landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .rd-landing { padding: 22px 20px 28px; }
+  .rd-landing-install-cmd { padding: 14px 14px 14px 16px; font-size: 13px; }
+  .rd-landing-install-cmd code { font-size: 13px; }
+  .rd-landing-foot { font-size: 10.5px; }
+}
