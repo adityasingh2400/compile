@@ -26,8 +26,9 @@ function build(): { client: ITensorlakeClient; mode: string } {
   if (process.env.TENSORLAKE_API_KEY) {
     const real = new RealTensorlakeClient({
       apiKey: process.env.TENSORLAKE_API_KEY,
-      endpoint: process.env.TENSORLAKE_ENDPOINT ?? "https://api.tensorlake.ai",
-      phiModel: process.env.TENSORLAKE_PHI_MODEL ?? "phi-3-mini",
+      endpoint: process.env.TENSORLAKE_ENDPOINT,
+      phiImage: process.env.COMPILE_PHI_IMAGE ?? "compile-phi-mini",
+      phiModel: process.env.COMPILE_PHI_MODEL ?? "phi3:mini",
     });
     return {
       client: new TensorlakeWithLocalFallback(real, fallback),

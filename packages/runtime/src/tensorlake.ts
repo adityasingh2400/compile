@@ -143,15 +143,22 @@ export interface RealTensorlakeOptions {
   apiKey?: string;
   /** Tensorlake API base URL. Defaults to the SDK's cloud endpoint. */
   endpoint?: string;
-  /** Phi model name in Tensorlake's catalog (D1: "Phi-3-mini"). */
-  phiModel?: string;
   /** Worker count for runEmittedFunction. Demo uses 64 (DESIGN.md). */
   workerCount?: number;
-  /** Sandbox sizing knobs. */
+  /** Gate sandbox sizing. */
   name?: string;
   cpus?: number;
   memoryMb?: number;
   timeoutSecs?: number;
+
+  /** Tensorlake-registered image with ollama + the Phi model pre-pulled.
+   * Built once via `npm run build:phi-image` (see build-phi-image.ts).
+   * When unset, runPhi throws so TensorlakeWithLocalFallback engages. */
+  phiImage?: string;
+  /** Ollama model tag inside the image. Defaults to "phi3:mini" (D1). */
+  phiModel?: string;
+  phiCpus?: number;
+  phiMemoryMb?: number;
 }
 
 export class RealTensorlakeClient implements ITensorlakeClient {
@@ -265,28 +272,161 @@ for (const t of traces) {
     return { outputs, latency_ms, fallback_invoked };
   }
 
+  // ── Phi sandbox lifecycle ───────────────────────────────────────────────
+  // Distinct from the gate sandbox: phi runs inside an image that has
+  // ollama + phi3:mini baked in (built via `npm run build:phi-image`). Gate
+  // doesn't need that footprint. Keeping them separate lets `warm()` boot
+  // both in parallel without one stalling on the other.
+  private phiSandbox: Sandbox | null = null;
+  private phiWarming: Promise<void> | null = null;
+  private phiServePid: number | null = null;
+
+  private async getPhiSandbox(): Promise<Sandbox> {
+    if (!this.opts.phiImage) {
+      throw new Error(
+        "RealTensorlakeClient.runPhi: phiImage not configured — set opts.phiImage to the registered Tensorlake image (e.g. 'compile-phi-mini' built via npm run build:phi-image)",
+      );
+    }
+    if (this.phiSandbox) return this.phiSandbox;
+    if (!this.phiWarming) {
+      this.phiWarming = (async () => {
+        const sb = await Sandbox.create({
+          name: `${this.opts.name ?? "compile-runtime"}-phi-${Date.now()}`,
+          image: this.opts.phiImage,
+          cpus: this.opts.phiCpus ?? 2,
+          memoryMb: this.opts.phiMemoryMb ?? 4096,
+          timeoutSecs: this.opts.timeoutSecs ?? 1800,
+          ...(this.opts.apiKey ? { apiKey: this.opts.apiKey } : {}),
+          ...(this.opts.endpoint ? { apiUrl: this.opts.endpoint } : {}),
+        });
+
+        // Start ollama serve as a long-running process.
+        const proc = await sb.startProcess("bash", {
+          args: ["-lc", "ollama serve > /tmp/ollama.log 2>&1"],
+        });
+        this.phiServePid = proc.pid;
+
+        // Wait up to 30s for the API to come online. We poll inside the
+        // sandbox via curl rather than via createTunnel so this works even
+        // when the runtime can't reach the sandbox's exposed port directly.
+        const ready = await sb.run("bash", {
+          args: [
+            "-lc",
+            "for i in $(seq 1 30); do " +
+              "curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && exit 0; " +
+              "sleep 1; " +
+              "done; exit 1",
+          ],
+          timeout: 60,
+        });
+        if (ready.exitCode !== 0) {
+          throw new Error(
+            `RealTensorlakeClient: ollama serve never came up (stderr=${ready.stderr.slice(0, 300)})`,
+          );
+        }
+
+        // Force-load the model into RAM with a tiny generate. This pays the
+        // first-load cost (~3-8s for phi3:mini) here instead of on the
+        // first runPhi call. Without this, demo's first Tier-2 call lands
+        // with a 5s+ stall.
+        const model = this.opts.phiModel ?? "phi3:mini";
+        await sb.run("bash", {
+          args: [
+            "-lc",
+            `curl -fsS -X POST http://127.0.0.1:11434/api/generate ` +
+              `-H 'Content-Type: application/json' ` +
+              `-d '${JSON.stringify({ model, prompt: "hi", stream: false }).replace(/'/g, "'\\''")}'`,
+          ],
+          timeout: 60,
+        });
+
+        this.phiSandbox = sb;
+      })();
+    }
+    await this.phiWarming;
+    if (!this.phiSandbox) throw new Error("RealTensorlakeClient: phi sandbox creation failed");
+    return this.phiSandbox;
+  }
+
   async runPhi(args: RunPhiArgs): Promise<RunPhiResult> {
-    // Tensorlake's TS SDK exposes Sandboxes, not a hosted Phi endpoint —
-    // real Phi-3-mini in-sandbox needs a custom image with weights baked
-    // in (next step). Until that lands, surfacing the same error the SDK
-    // would throw lets TensorlakeWithLocalFallback route to the local
-    // Phi mirror used in tests so the demo's Tier-2 path still completes.
-    void args;
-    throw new Error("RealTensorlakeClient.runPhi: Phi sandbox image not yet built — falling back");
+    const sb = await this.getPhiSandbox();
+    const t0 = performance.now();
+
+    // Compose the final prompt: emitted-tier-2 "code" is the prompt template;
+    // the input is the call-site payload. Ollama's /api/generate returns
+    // `{ model, response, done, total_duration, ... }`. We ask for JSON-mode
+    // output since the demo's call sites all return structured shapes.
+    const composed = `${args.prompt}\n\nInput: ${JSON.stringify(args.input)}\n\nReturn ONLY a single JSON value.`;
+    const body = JSON.stringify({
+      model: this.opts.phiModel ?? "phi3:mini",
+      prompt: composed,
+      stream: false,
+      format: "json",
+      options: { temperature: 0 },
+    });
+
+    // Avoid argv length blowups: write the body to a tmp file and curl from it.
+    const enc = new TextEncoder();
+    const reqPath = `/tmp/phi-req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    await sb.writeFile(reqPath, enc.encode(body));
+    const result = await sb.run("bash", {
+      args: [
+        "-lc",
+        `curl -fsS -X POST http://127.0.0.1:11434/api/generate ` +
+          `-H 'Content-Type: application/json' ` +
+          `--data-binary @${reqPath}`,
+      ],
+      timeout: 60,
+    });
+
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `RealTensorlakeClient.runPhi: ollama returned exit=${result.exitCode} stderr=${result.stderr.slice(0, 300)}`,
+      );
+    }
+
+    let parsed: { response?: string };
+    try {
+      parsed = JSON.parse(result.stdout);
+    } catch {
+      throw new Error(`RealTensorlakeClient.runPhi: ollama response not JSON: ${result.stdout.slice(0, 200)}`);
+    }
+    let output: unknown = parsed.response ?? null;
+    // Ollama in `format: "json"` mode wraps the model's JSON inside the
+    // `response` string — try to deserialize it so the caller sees a real
+    // object. If the model misbehaved we surface the raw string.
+    if (typeof output === "string") {
+      try {
+        output = JSON.parse(output);
+      } catch {
+        /* keep raw string */
+      }
+    }
+    return { output, latency_ms: performance.now() - t0 };
   }
 
   async warm(): Promise<void> {
-    await this.getSandbox();
+    // Warm gate + phi in parallel so total cold-start isn't the sum of both.
+    await Promise.all([
+      this.getSandbox(),
+      this.opts.phiImage ? this.getPhiSandbox() : Promise.resolve(),
+    ]);
   }
 
   async close(): Promise<void> {
-    if (!this.sandbox) return;
-    try {
-      await this.sandbox.terminate();
-    } finally {
+    const errors: unknown[] = [];
+    if (this.sandbox) {
+      try { await this.sandbox.terminate(); } catch (e) { errors.push(e); }
       this.sandbox = null;
       this.warming = null;
     }
+    if (this.phiSandbox) {
+      try { await this.phiSandbox.terminate(); } catch (e) { errors.push(e); }
+      this.phiSandbox = null;
+      this.phiWarming = null;
+      this.phiServePid = null;
+    }
+    if (errors.length) throw errors[0];
   }
 }
 

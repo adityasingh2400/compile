@@ -17,8 +17,9 @@
     "test": "vitest run",
     "derisk:phi": "tsx src/phi/derisk.ts",
     "generate:inputs": "tsx src/inputs/cli.ts",
-    "warm": "node ./dist/warm-cli.js",
-    "live-smoke": "node --env-file=../../.env.local ./dist/tensorlake-smoke.js"
+    "warm": "node --env-file-if-exists=../../.env.local ./dist/warm-cli.js",
+    "live-smoke": "node --env-file=../../.env.local ./dist/tensorlake-smoke.js",
+    "build:phi-image": "node --env-file=../../.env.local ./dist/build-phi-image.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
