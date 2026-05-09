@@ -163,7 +163,8 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
       const h = canvas.clientHeight;
 
       // Cream trail-fade — leaves a subtle ghost behind moving nodes.
-      ctx.fillStyle = "rgba(255, 247, 240, 0.22)";
+      // Slightly more opaque so larger nodes don't smear into long streaks.
+      ctx.fillStyle = "rgba(255, 247, 240, 0.32)";
       ctx.fillRect(0, 0, w, h);
 
       const cx = w / 2;
@@ -184,20 +185,37 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
         }
       }
 
-      // Standard alpha compositing on the cream canvas — additive
-      // would wash out against the light backdrop.
+      // Two-pass paint: outer halo (translucent, larger) + crisp core dot.
+      // Bigger nodes + a darker core give strong contrast against cream.
+      const coreSize = live.current.clustering ? 3.0 : 4.0;
+      const haloSize = live.current.clustering ? 6.5 : 8.5;
+      // Outer halo pass
       for (let i = 0; i < buf.count; i++) {
         const ramp = buf.ramp[i]!;
-        // Start as a soft warm ink, lerp to the cluster's accent color.
         const r = 0.45 * (1 - ramp) + buf.r[i]! * ramp;
         const g = 0.25 * (1 - ramp) + buf.g[i]! * ramp;
         const b = 0.18 * (1 - ramp) + buf.b[i]! * ramp;
-        const alpha = 0.55 + ramp * 0.35;
+        const alpha = 0.18 + ramp * 0.18;
         ctx.fillStyle = `rgba(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0}, ${alpha})`;
         const px = cx + buf.x[i]! * scale;
         const py = cy + buf.y[i]! * scale;
-        const sz = live.current.clustering ? 1.6 : 2.0;
-        ctx.fillRect(px, py, sz, sz);
+        ctx.beginPath();
+        ctx.arc(px, py, haloSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Crisp core pass — fully saturated, high contrast on cream.
+      for (let i = 0; i < buf.count; i++) {
+        const ramp = buf.ramp[i]!;
+        const r = 0.32 * (1 - ramp) + buf.r[i]! * 0.85 * ramp;
+        const g = 0.16 * (1 - ramp) + buf.g[i]! * 0.85 * ramp;
+        const b = 0.12 * (1 - ramp) + buf.b[i]! * 0.85 * ramp;
+        const alpha = 0.85 + ramp * 0.12;
+        ctx.fillStyle = `rgba(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0}, ${alpha})`;
+        const px = cx + buf.x[i]! * scale;
+        const py = cy + buf.y[i]! * scale;
+        ctx.beginPath();
+        ctx.arc(px, py, coreSize, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       if (live.current.showHalos) {
@@ -282,8 +300,8 @@ function CharacteristicHalos({
     return { c, px, py, cardX, cardY };
   });
 
-  const minX = 230;
-  const minY = 100;
+  const minX = 320;
+  const minY = 170;
   for (let pass = 0; pass < 6; pass++) {
     let moved = false;
     for (let i = 0; i < cards.length; i++) {
@@ -332,11 +350,6 @@ function CharacteristicHalos({
         ))}
       </svg>
       {cards.map(({ c, cardX, cardY }, i) => {
-        // Pick the most-illustrative single characteristic — the "→ output"
-        // one when it exists, otherwise the first.
-        const primary =
-          c.characteristics.find((ch) => ch.key.startsWith("→")) ??
-          c.characteristics[0];
         return (
           <div
             key={c.cluster_id}
@@ -345,8 +358,8 @@ function CharacteristicHalos({
               left: `${cardX}px`,
               top: `${cardY}px`,
               animationDelay: `${i * 100}ms`,
-              borderColor: `rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.55)`,
-              boxShadow: `0 0 28px -6px rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.4)`,
+              borderColor: `rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.85)`,
+              boxShadow: `0 6px 22px -6px rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.55), 0 1px 0 0 rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.18)`,
             }}
           >
             <div className="syn-halo-row">
@@ -354,18 +367,20 @@ function CharacteristicHalos({
                 className="dot"
                 style={{
                   background: `rgb(${c.color[0]}, ${c.color[1]}, ${c.color[2]})`,
-                  boxShadow: `0 0 10px rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.7)`,
+                  boxShadow: `0 0 12px rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.85)`,
                 }}
               />
               <span className="lbl">{c.label}</span>
               <span className="share">{Math.round(c.share * 100)}%</span>
             </div>
-            {primary ? (
-              <div className="syn-halo-primary">
-                <span className="key">{primary.key}</span>
-                <span className="val">{primary.value}</span>
-              </div>
-            ) : null}
+            <div className="syn-halo-chars">
+              {c.characteristics.map((ch) => (
+                <div className="syn-halo-char" key={ch.key}>
+                  <span className="key">{ch.key}</span>
+                  <span className="val">{ch.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
         );
       })}
