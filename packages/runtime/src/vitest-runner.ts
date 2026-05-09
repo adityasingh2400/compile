@@ -1,8 +1,25 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Trace } from "@compile/schemas";
+
+/** Walk up from this file to find the workspace root (containing node_modules/.bin/vitest). */
+async function findVitestBin(): Promise<string> {
+  let cur = dirname(fileURLToPath(import.meta.url));
+  const root = parse(cur).root;
+  while (cur !== root) {
+    const candidate = resolve(cur, "node_modules/.bin/vitest");
+    try {
+      await stat(candidate);
+      return candidate;
+    } catch {
+      cur = dirname(cur);
+    }
+  }
+  throw new Error("vitest binary not found in any parent node_modules/.bin");
+}
 
 export interface RunHoldoutArgs {
   /** Body of the agent-emitted TS function — full file contents. */
@@ -154,11 +171,12 @@ export async function runHoldout(args: RunHoldoutArgs): Promise<HoldoutRunResult
   }
 }
 
-function runVitest(cwd: string): Promise<VitestJsonReport> {
-  return new Promise((resolve, reject) => {
+async function runVitest(cwd: string): Promise<VitestJsonReport> {
+  const bin = await findVitestBin();
+  return new Promise((res, reject) => {
     const proc = spawn(
-      "npx",
-      ["--no-install", "vitest", "run", "--reporter=json", "--no-color"],
+      bin,
+      ["run", "--reporter=json", "--no-color", "--root", cwd],
       { cwd, env: { ...process.env, CI: "1" } },
     );
     let stdout = "";
@@ -179,7 +197,7 @@ function runVitest(cwd: string): Promise<VitestJsonReport> {
       }
       try {
         const report = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
-        resolve(report as VitestJsonReport);
+        res(report as VitestJsonReport);
       } catch (e) {
         reject(new Error(`vitest JSON parse failed: ${(e as Error).message}`));
       }

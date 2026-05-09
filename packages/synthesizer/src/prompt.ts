@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, parse } from "node:path";
 
 /**
  * Single source of truth: extract the verbatim synthesizer prompt from
@@ -8,7 +8,7 @@ import { dirname, resolve } from "node:path";
  * after "## The prompt" and the next closing ```.
  */
 export async function loadSynthesizerPrompt(repoRoot?: string): Promise<string> {
-  const root = repoRoot ?? findRepoRoot();
+  const root = repoRoot ?? (await findRepoRoot());
   const path = resolve(root, "prompts/synthesizer.md");
   const md = await readFile(path, "utf8");
   const headingIdx = md.indexOf("## The prompt");
@@ -21,8 +21,17 @@ export async function loadSynthesizerPrompt(repoRoot?: string): Promise<string> 
   return md.slice(bodyStart, fenceClose).trim();
 }
 
-function findRepoRoot(): string {
-  // synthesizer compiles to dist/prompt.js → repo root is ../../../..
-  const here = dirname(fileURLToPath(import.meta.url));
-  return resolve(here, "..", "..", "..", "..");
+/** Walk up from this file until we find prompts/synthesizer.md. */
+async function findRepoRoot(): Promise<string> {
+  let cur = dirname(fileURLToPath(import.meta.url));
+  const root = parse(cur).root;
+  while (cur !== root) {
+    try {
+      await stat(resolve(cur, "prompts/synthesizer.md"));
+      return cur;
+    } catch {
+      cur = dirname(cur);
+    }
+  }
+  throw new Error("findRepoRoot: prompts/synthesizer.md not found in any parent directory");
 }
