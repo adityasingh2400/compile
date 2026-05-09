@@ -140,9 +140,8 @@ function deriveSeedTokens(
 ): string[] | undefined {
   if (!generated || generated.length === 0) return undefined;
   const tokens: string[] = [];
-  // Take ONE salient field per sample so each chip is its own input. Rotate
-  // through preferred field names so tokens read like a stream of distinct
-  // generated calls instead of a dense object dump.
+  // Rotate field preference per sample so chips show distinct fields (industry,
+  // company, size, signal, ...) rather than the same key 24 times.
   const preferOrder = [
     "industry",
     "company",
@@ -153,11 +152,24 @@ function deriveSeedTokens(
     "tone",
     "competitor",
   ];
+  let rot = 0;
   for (const cluster of generated) {
     for (const sample of cluster.samples) {
       const i = sample.input as Record<string, unknown>;
       if (!i || typeof i !== "object") continue;
-      const key = preferOrder.find((k) => i[k] !== undefined) ?? Object.keys(i)[0];
+      // Try fields in rotated order so each successive sample picks a
+      // different "first preferred" key.
+      const keys = Object.keys(i);
+      let chosen: string | undefined;
+      for (let off = 0; off < preferOrder.length; off++) {
+        const candidate = preferOrder[(rot + off) % preferOrder.length]!;
+        if (candidate in i) {
+          chosen = candidate;
+          break;
+        }
+      }
+      const key = chosen ?? keys[0];
+      rot++;
       if (!key) continue;
       const v = i[key];
       if (v === undefined || v === null) continue;

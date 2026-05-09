@@ -1,10 +1,10 @@
 import { useStore } from "../store.js";
 
 const DOC_POSITIONS: { left: string; top: string; rotate: string }[] = [
-  { left: "8%", top: "28%", rotate: "-6deg" },
-  { left: "30%", top: "20%", rotate: "1deg" },
-  { left: "52%", top: "30%", rotate: "5deg" },
-  { left: "70%", top: "22%", rotate: "-3deg" },
+  { left: "8%", top: "12%", rotate: "-6deg" },
+  { left: "30%", top: "8%", rotate: "1deg" },
+  { left: "52%", top: "12%", rotate: "5deg" },
+  { left: "72%", top: "10%", rotate: "-3deg" },
 ];
 
 const DOC_TITLES = [
@@ -27,9 +27,6 @@ export function ReadingDocsPage(): JSX.Element {
 
   return (
     <div className="docs-stage">
-      <div className="seed-pool-counter">
-        seed inputs generated · <b>{seedCount}</b> / 100
-      </div>
       {DOC_POSITIONS.map((p, i) => (
         <div
           key={i}
@@ -44,19 +41,27 @@ export function ReadingDocsPage(): JSX.Element {
           {DOC_TEXT[i]}
         </div>
       ))}
-      {tokens.map((t) => (
-        <div
-          key={t.id}
-          className="seed-token"
-          style={{
-            left: `${t.x}%`,
-            top: `${t.y}%`,
-            transform: `translate(-50%, -50%)`,
-          }}
-        >
-          {t.text}
+      <div className="seed-pool">
+        <div className="seed-pool-label">
+          synthetic seed inputs · grounded in customer corpus
         </div>
-      ))}
+        <div className="seed-pool-tokens">
+          {tokens.map((t, idx) => (
+            <span
+              key={t.id}
+              className="seed-token-chip"
+              style={{
+                animationDelay: `${idx * 30}ms`,
+              }}
+            >
+              {t.text}
+            </span>
+          ))}
+        </div>
+        <div className="seed-pool-counter">
+          <b>{seedCount}</b> / 100 seeds · variation knobs ready ↓
+        </div>
+      </div>
     </div>
   );
 }
