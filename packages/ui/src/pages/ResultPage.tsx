@@ -89,6 +89,15 @@ export function ResultPage(): JSX.Element {
           </div>
         </div>
       </div>
+      <div className="result-receipts">
+        <div className="result-receipts-hd">measured Friday · receipts</div>
+        <div className="result-receipts-row">
+          <span><b>scanner</b> 10 sites · 2g/3y/5r · ground-truth match</span>
+          <span><b>phi-3-mini</b> warm e2e p95 2.24s · keep_alive 4h · D6 mitigated</span>
+          <span><b>mcp pack</b> @compile/mcp · publish-ready</span>
+          <span><b>synthesizer</b> 3-cluster harness · 22 tests pass</span>
+        </div>
+      </div>
       <div className="result-watcher">
         <span className="dot" />
         always-on proxy mode · drift watcher · cluster refiner · new-pattern miner
