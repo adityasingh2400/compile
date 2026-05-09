@@ -2,4 +2,6 @@ export * from "./receipt.js";
 export * from "./cluster.js";
 export * from "./synthesis.js";
 export * from "./vault.js";
+export * from "./scanner.js";
+export * from "./synthload.js";
 export * from "./mcp.js";

@@ -77,6 +77,8 @@ export const NegativeReasonSchema = z.enum([
   "high_variance_outputs",
   "creative_task",
   "novel_reasoning_required",
+  /** v7: site failed Stage-1 static priors. Expires on code change. */
+  "low_static_prior",
 ]);
 export type NegativeReason = z.infer<typeof NegativeReasonSchema>;
 
@@ -84,6 +86,8 @@ export const RetryPolicySchema = z.object({
   type: z.enum(["sticky", "expiring"]),
   retry_when_traces: z.number().int().positive().optional(),
   retry_on_distribution_shift: z.boolean().default(false),
+  /** v7: re-evaluate when the call site's git SHA changes. */
+  retry_on_code_change: z.boolean().default(false),
 });
 export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
 
@@ -102,15 +106,21 @@ export const SynthesisEnvelopeSchema = z.discriminatedUnion("synthesizable", [
 ]);
 export type SynthesisEnvelope = z.infer<typeof SynthesisEnvelopeSchema>;
 
-/** Default retry policy by negative reason — see ENG_REVIEW.md D8. */
+/** Default retry policy by negative reason — see ENG_REVIEW.md D8 (v7 row added). */
 export const RETRY_POLICY_BY_REASON: Record<NegativeReason, RetryPolicy> = {
-  creative_task: { type: "sticky", retry_on_distribution_shift: false },
-  novel_reasoning_required: { type: "sticky", retry_on_distribution_shift: false },
-  high_variance_outputs: { type: "sticky", retry_on_distribution_shift: true },
+  creative_task: { type: "sticky", retry_on_distribution_shift: false, retry_on_code_change: false },
+  novel_reasoning_required: { type: "sticky", retry_on_distribution_shift: false, retry_on_code_change: false },
+  high_variance_outputs: { type: "sticky", retry_on_distribution_shift: true, retry_on_code_change: false },
   insufficient_data: {
     type: "expiring",
     retry_when_traces: 30,
     retry_on_distribution_shift: false,
+    retry_on_code_change: false,
+  },
+  low_static_prior: {
+    type: "expiring",
+    retry_on_distribution_shift: false,
+    retry_on_code_change: true,
   },
 };
 

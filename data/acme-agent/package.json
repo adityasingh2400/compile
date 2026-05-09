@@ -1,0 +1,7 @@
+{
+  "name": "acme-agent",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Demo customer repo scanned by Compile during the 90-second bootstrap. Not a real package.",
+  "type": "module"
+}
