@@ -149,3 +149,9 @@ export const useStore = create<DemoState & DemoActions>((set: Setter) => ({
 
 /** Selector helpers used across pages. */
 export const selectActivePage = (s: DemoState) => s.page_index;
+
+// Dev exposure — lets the operator inspect store state from the browser
+// console (`window.__compileStore.getState()`). No-op in non-browser builds.
+if (typeof window !== "undefined") {
+  (window as unknown as { __compileStore: typeof useStore }).__compileStore = useStore;
+}

@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { HERO_CALL_SITE_ID, HERO_CLUSTERS } from "../demo/fixtures.js";
 
-function heroName(s: ReturnType<typeof useStore.getState>): string {
-  const id = s.fixtures?.heroCallSiteId ?? HERO_CALL_SITE_ID;
-  const site = s.callSites.find((c) => c.call_site_id === id);
-  return site?.function_hint ?? id.split(":")[1] ?? id;
+function useHeroName(): string {
+  return useStore((s) => {
+    const id = s.fixtures?.heroCallSiteId ?? HERO_CALL_SITE_ID;
+    const sites =
+      s.callSites.length > 0 ? s.callSites : s.fixtures?.callSites ?? [];
+    const site = sites.find((c) => c.call_site_id === id);
+    return site?.function_hint ?? id.split(":")[1] ?? id;
+  });
 }
 
 /**
@@ -14,6 +18,7 @@ function heroName(s: ReturnType<typeof useStore.getState>): string {
  */
 export function ClustersRevealedPage(): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
+  const heroName = useHeroName();
   const [revealed, setRevealed] = useState<number>(0);
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 1280, h: 720 });
 
@@ -50,7 +55,7 @@ export function ClustersRevealedPage(): JSX.Element {
     <div className="overlay-root" ref={containerRef}>
       <div className="const-chrome-tl">
         <div>
-          <b>{heroName(useStore.getState())}</b>
+          <b>{heroName}</b>
         </div>
         <div>
           <b>7</b> sub-patterns · 6 tier-1 · 1 tier-2

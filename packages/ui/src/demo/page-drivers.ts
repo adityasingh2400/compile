@@ -30,11 +30,14 @@ export async function ensurePhaseContent(
   phase: string,
   getState: GetState,
 ): Promise<void> {
+  // Scan/callSites is upstream context for everything past page 3 — the
+  // constellation chrome shows the hero call site's function_hint, which
+  // requires the scan report. Always seed it first when needed.
+  await ensureScan(getState);
   switch (phase) {
     case "reading_code":
-      return ensureScan(getState);
     case "classify":
-      return ensureScan(getState);
+      return; // ensureScan above is sufficient
     case "reading_docs":
       return ensureDocs(getState);
     case "expanding":
