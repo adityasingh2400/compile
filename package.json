@@ -18,7 +18,8 @@
     "snapshot": "npm run snapshot -w @compile/ui",
     "harness": "npm run harness -w @compile/synthesizer",
     "warm": "npm run build -w @compile/runtime && npm run warm -w @compile/runtime",
-    "bench": "npm run build -w @compile/synth-loader && npm run bench -w @compile/synth-loader"
+    "bench": "npm run build -w @compile/synth-loader && npm run bench -w @compile/synth-loader",
+    "daemon:fake": "node scripts/serve-fake-daemon.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
