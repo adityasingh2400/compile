@@ -243,6 +243,28 @@ function tracesFromReceipts(receipts: ReadonlyArray<{
   }));
 }
 
+/**
+ * Best-effort Nia vault write. Failures are logged to stderr but never
+ * thrown — the demo flow must survive Nia outages, quota exhaustion (free
+ * tier is 5 saves / month at the time of writing), and transient 5xx. The
+ * UI still gets its `vault_event` stream emit because we treat the write
+ * as a side-channel observation, not part of the agent contract.
+ *
+ * Set COMPILE_VAULT_STRICT=1 to surface errors during dev. */
+async function safeVaultWrite(
+  nia: INiaClient,
+  entry: Parameters<INiaClient["vaultWrite"]>[0],
+  label: string,
+): Promise<void> {
+  try {
+    await nia.vaultWrite(entry);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[vault] ${label} write failed (continuing): ${msg.slice(0, 200)}`);
+    if (process.env.COMPILE_VAULT_STRICT === "1") throw err;
+  }
+}
+
 export function buildHandlers(deps: HandlerDeps): Record<
   McpToolName,
   (raw: unknown) => Promise<unknown>
@@ -252,6 +274,18 @@ export function buildHandlers(deps: HandlerDeps): Record<
   const stream: IBootstrapStream = deps.stream ?? new NoopBootstrapStream();
   const tensorlake: ITensorlakeClient =
     deps.tensorlake ?? new LocalFakeTensorlakeClient();
+  /**
+   * Local mirror of positive Vault entries written this session. Belt-and-
+   * suspenders for run_codified: when Nia's vaultWrite succeeds we end up
+   * in both stores; when Nia is degraded (quota / outage) we still have a
+   * source of truth for what the agent just emitted. Lookup order in
+   * run_codified is local-first then Nia, so a freshly-gated function
+   * always runs even when Nia is dark.
+   */
+  const localPositiveMirror = new Map<
+    string,
+    Extract<Parameters<INiaClient["vaultWrite"]>[0], { kind: "positive" }>
+  >();
   const runId = (): string => {
     if (deps.runId) return deps.runId();
     let rid = deps.bootstrap.getRunId();
@@ -275,23 +309,26 @@ export function buildHandlers(deps: HandlerDeps): Record<
       // Page 2 → Page 3: Stage-1 priors computed; codifiability decided (D13).
       await stream.advancePhase({ run_id: rid, phase: "classify" });
       // Eagerly write Stage-1 RED sites to negative Vault per D8 / D11 so
-      // routing skips synthesis on them next time.
-      for (const cs of report.call_sites) {
-        if (cs.priors.pill === "red") {
-          const entry = {
-            kind: "negative" as const,
-            cluster_signature: cs.call_site_id,
-            reason: "low_static_prior" as const,
-            retry_policy: RETRY_POLICY_BY_REASON.low_static_prior,
-            trace_count_at_decision: 0,
-            created_at: new Date().toISOString(),
-          };
-          await deps.nia.vaultWrite(entry);
-          await stream.emitVaultEvent({
-            event: { run_id: rid, entry, emitted_at: entry.created_at },
-          });
-        }
-      }
+      // routing skips synthesis on them next time. Parallel + best-effort
+      // so a Nia quota / outage doesn't add 5s of dead air to page 2.
+      await Promise.all(
+        report.call_sites
+          .filter((cs) => cs.priors.pill === "red")
+          .map(async (cs) => {
+            const entry = {
+              kind: "negative" as const,
+              cluster_signature: cs.call_site_id,
+              reason: "low_static_prior" as const,
+              retry_policy: RETRY_POLICY_BY_REASON.low_static_prior,
+              trace_count_at_decision: 0,
+              created_at: new Date().toISOString(),
+            };
+            await safeVaultWrite(deps.nia, entry, `scan_repo:red:${cs.call_site_id}`);
+            await stream.emitVaultEvent({
+              event: { run_id: rid, entry, emitted_at: entry.created_at },
+            });
+          }),
+      );
       return report;
     },
 
@@ -363,16 +400,19 @@ export function buildHandlers(deps: HandlerDeps): Record<
 
     "compile.run_codified": async (raw) => {
       const { function_id, input } = RunCodifiedInput.parse(raw);
-      // Lookup the positive Vault entry for this function_id.
-      const lookup = await deps.nia.vaultLookup(function_id);
-      if (lookup.state !== "positive") {
-        // Try lookup-by-function_id semantics: scan all entries (Lane D will
-        // make this an indexed query).
+      // Local mirror first — survives Nia outage / quota exhaustion. Then
+      // Nia for cross-session lookups (entries written in a previous run).
+      const local = localPositiveMirror.get(function_id);
+      const entry = local ?? (await (async () => {
+        const lookup = await deps.nia.vaultLookup(function_id);
+        return lookup.state === "positive" ? lookup.entry : null;
+      })());
+      if (!entry) {
         throw new Error(`run_codified: no positive Vault entry for ${function_id}`);
       }
-      const env = lookup.entry.envelope;
+      const env = entry.envelope;
       return await runCodified({
-        function_id: lookup.entry.function_id,
+        function_id: entry.function_id,
         function_name: env.function_name,
         code: env.code,
         input,
@@ -498,7 +538,7 @@ export function buildHandlers(deps: HandlerDeps): Record<
           trace_count_at_decision: pending.spec.traces.length + pending.holdout_traces.length,
           created_at: new Date().toISOString(),
         };
-        await deps.nia.vaultWrite(entry);
+        await safeVaultWrite(deps.nia, entry, "submit_synthesis");
         await stream.emitSynthesisEvent({
           event: {
             run_id: rid,
@@ -550,7 +590,8 @@ export function buildHandlers(deps: HandlerDeps): Record<
           hit_count: 0,
           estimated_savings_usd_total: 0,
         };
-        await deps.nia.vaultWrite(entry);
+        localPositiveMirror.set(function_id, entry);
+        await safeVaultWrite(deps.nia, entry, "submit_synthesis");
         await stream.emitSynthesisEvent({
           event: {
             run_id: rid,
