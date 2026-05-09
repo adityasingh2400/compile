@@ -25,6 +25,7 @@ import {
 import {
   AUDIT_CALL_SITES,
   CODIFIABLE_WORKFLOWS,
+  REPO_PATH,
   type AuditCallSite,
 } from "../data/workflows.js";
 
@@ -67,7 +68,7 @@ function buildBootLines(args: {
       level: "ok",
       text: `✓ sandbox ready · ${args.sandboxId}${args.live ? "" : ""} · ${args.live ? "real cold start" : "4012ms cold start"}`,
     },
-    { ts: "00:01.044", level: "info", text: "agent.audit({ repo: 'data/acme-agent' })" },
+    { ts: "00:01.044", level: "info", text: `agent.audit({ repo: '${REPO_PATH}' })` },
     { ts: "00:01.061", level: "info", text: "  · git rev-parse HEAD → a3f2d1b" },
     { ts: "00:01.118", level: "info", text: "  · ts-morph project · loading tsconfig.json" },
     { ts: "00:01.420", level: "ok", text: "✓ project loaded · 38 source files · 4 packages" },

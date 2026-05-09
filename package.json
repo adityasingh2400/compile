@@ -15,6 +15,7 @@
     "test": "npm run test --workspaces --if-present",
     "dev:mcp": "npm run dev -w @compile/mcp-server",
     "dev:ui": "npm run dev -w @compile/ui",
+    "demo": "npm run prewarm:ui && npm run dev:ui",
     "snapshot": "npm run snapshot -w @compile/ui",
     "harness": "npm run harness -w @compile/synthesizer",
     "warm": "npm run build -w @compile/runtime && npm run warm -w @compile/runtime",

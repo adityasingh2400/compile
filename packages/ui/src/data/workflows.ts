@@ -888,6 +888,14 @@ export const WORKFLOW_DATA_SOURCE: "live" | "fallback" =
 export const OBSERVED_SPEND_24H: number = DERIVED.observedSpend24h;
 export const TRACE_COUNT: number = DERIVED.traceCount;
 export const OBSERVED_SITE_COUNT: number = DERIVED.siteCount;
+/** Production-scale assumption (proxy-sample inverse). */
+export const SCALE_FACTOR: number = DERIVED.scaleFactor;
+export const SCALE_SAMPLE_RATE_PCT: string = DERIVED.scaleSampleRatePct;
+export const SCALED_ANNUAL_SPEND_USD: number = DERIVED.scaledAnnualSpendUsd;
+/** Repo namespace + path derived from the first observed call_site_hash.
+ *  Adapts the audit chrome when the underlying corpus changes (acme → folk). */
+export const REPO_NAMESPACE: string = DERIVED.namespace;
+export const REPO_PATH: string = DERIVED.repoPath;
 
 /** Convenience accessor used by every page. */
 export function getWorkflowById(id: string): Workflow | undefined {
