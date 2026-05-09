@@ -20,6 +20,7 @@
     "@compile/schemas": "*",
     "@compile/nia": "*",
     "@compile/stream": "*",
-    "@compile/runtime": "*"
+    "@compile/runtime": "*",
+    "@anthropic-ai/sdk": "^0.32.1"
   }
 }

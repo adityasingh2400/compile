@@ -25,6 +25,13 @@ import {
   TensorlakeWithLocalFallback,
   type ITensorlakeClient,
 } from "@compile/runtime";
+import {
+  AnthropicOracleClient,
+  BudgetedOracleClient,
+  OracleWithLocalFallback,
+  StubOracleClient,
+  type IOracleClient,
+} from "@compile/synth-loader";
 import { MemoryRequestStore } from "./store.js";
 import {
   buildHandlers,
@@ -62,6 +69,30 @@ const tensorlake: ITensorlakeClient = (() => {
   }
   return fallback;
 })();
+// Frontier oracle (D9, D10). Default Stub when no creds — keeps demos
+// running offline + makes oracle_agreement deterministic across rehearsals.
+// With ANTHROPIC_API_KEY set we wrap AnthropicOracleClient in:
+//   1. BudgetedOracleClient (cost cap; default $5/run)
+//   2. OracleWithLocalFallback (retry-once + per-input fallback to Stub)
+// so a flaky API or budget trip degrades gracefully into stubbed oracle
+// samples for the remainder of the run instead of crashing Stage-2.
+const oracle: IOracleClient = (() => {
+  const stub = new StubOracleClient();
+  if (!process.env.ANTHROPIC_API_KEY) return stub;
+  const real = new AnthropicOracleClient({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    model: process.env.COMPILE_ORACLE_MODEL ?? "claude-sonnet-4-6",
+  });
+  const budgetUsd = parseFloat(process.env.COMPILE_ORACLE_BUDGET_USD ?? "5");
+  const budgeted = new BudgetedOracleClient(real, {
+    budgetUsd,
+    onTrip: (spent, cap) =>
+      console.error(
+        `[oracle] budget tripped at $${spent.toFixed(4)} of $${cap.toFixed(2)} cap; remaining calls fall back to stub`,
+      ),
+  });
+  return new OracleWithLocalFallback(budgeted, stub);
+})();
 const handlers = buildHandlers({
   nia,
   store,
@@ -69,6 +100,7 @@ const handlers = buildHandlers({
   bootstrap,
   stream,
   tensorlake,
+  oracle,
 });
 
 const server = new Server(
