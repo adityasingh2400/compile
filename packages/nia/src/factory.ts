@@ -21,7 +21,10 @@ export function createNiaClient(opts: CreateNiaClientOptions = {}): INiaClient {
   if (wantReal) {
     if (!apiKey) throw new Error("createNiaClient(real): missing NIA_API_KEY");
     if (!vaultId) throw new Error("createNiaClient(real): missing NIA_VAULT_ID");
-    return new RealNiaClient({ apiKey, vaultId });
+    const timeoutMs = process.env.NIA_TIMEOUT_MS
+      ? parseInt(process.env.NIA_TIMEOUT_MS, 10)
+      : undefined;
+    return new RealNiaClient({ apiKey, vaultId, timeoutMs });
   }
   return new StubNiaClient();
 }
