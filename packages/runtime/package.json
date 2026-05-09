@@ -15,9 +15,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "derisk:phi": "tsx src/phi/derisk.ts"
+    "derisk:phi": "tsx src/phi/derisk.ts",
+    "generate:inputs": "tsx src/inputs/cli.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.1",
     "@compile/schemas": "*"
   },
   "devDependencies": {
