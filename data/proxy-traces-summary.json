@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-05-09T17:32:12.091Z",
+  "total_traces": 250,
+  "threshold": 50,
+  "buckets": {
+    "acme:classify_ticket_priority:v1": {
+      "count": 65,
+      "status": "WILL_COMPILE"
+    },
+    "acme:classify_sentiment:v1": {
+      "count": 55,
+      "status": "WILL_COMPILE"
+    },
+    "acme:match_product_sku:v1": {
+      "count": 38,
+      "status": "BELOW_THRESHOLD"
+    },
+    "acme:classify_lead_tier:v1": {
+      "count": 28,
+      "status": "BELOW_THRESHOLD"
+    },
+    "acme:extract_invoice_fields:v1": {
+      "count": 22,
+      "status": "BELOW_THRESHOLD"
+    },
+    "acme:summarize_support_thread:v1": {
+      "count": 18,
+      "status": "FRONTIER_ZONE"
+    },
+    "acme:resolve_company_domain:v1": {
+      "count": 12,
+      "status": "FRONTIER_ZONE"
+    },
+    "acme:rewrite_email_formal:v1": {
+      "count": 8,
+      "status": "FRONTIER_ZONE"
+    },
+    "acme:draft_outreach_subject:v1": {
+      "count": 3,
+      "status": "FRONTIER_ZONE"
+    },
+    "acme:generate_marketing_copy:v1": {
+      "count": 1,
+      "status": "FRONTIER_ZONE"
+    }
+  },
+  "spend_usd": 0.66,
+  "timespan_hours": 24
+}
