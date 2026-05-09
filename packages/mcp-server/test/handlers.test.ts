@@ -179,6 +179,86 @@ describe("MCP handlers", () => {
     expect(find.state).toBe("negative");
   });
 
+  it("request_synthesis short-circuits when negative vault entry is sticky", async () => {
+    // Seed traces and learn the cluster signature the pipeline produces.
+    for (let i = 0; i < 30; i++) {
+      await h["compile.observe_call"](
+        mkReceipt(
+          i,
+          `Write a poem about "topic_${i}"`,
+          { topic: `topic_${i}` },
+          { text: "x".repeat(i + 1) },
+        ),
+      );
+    }
+    const list = (await h["compile.list_codify_candidates"]({ limit: 5 })) as {
+      candidates: Array<{ cluster_id: string; cluster_signature: string }>;
+    };
+    const { cluster_id, cluster_signature } = list.candidates[0]!;
+
+    // Pre-write a sticky negative for this cluster; mimics a prior session
+    // having decided "creative_task, never retry."
+    await nia.vaultWrite({
+      kind: "negative",
+      cluster_signature,
+      reason: "creative_task",
+      retry_policy: {
+        type: "sticky",
+        retry_on_distribution_shift: false,
+        retry_on_code_change: false,
+      },
+      trace_count_at_decision: 30,
+      created_at: new Date().toISOString(),
+    });
+
+    const out = (await h["compile.request_synthesis"]({ cluster_id })) as {
+      negative_cached?: true;
+      reason?: string;
+      synthesis_dollars_saved_estimate?: number;
+    };
+    expect(out.negative_cached).toBe(true);
+    expect(out.reason).toBe("creative_task");
+    expect(out.synthesis_dollars_saved_estimate).toBeGreaterThan(0);
+    // No spec was created → request store is empty.
+    expect(store.size()).toBe(0);
+  });
+
+  it("list_codify_candidates drops sticky-negative clusters", async () => {
+    for (let i = 0; i < 30; i++) {
+      await h["compile.observe_call"](
+        mkReceipt(
+          i,
+          `Write a poem about "topic_${i}"`,
+          { topic: `topic_${i}` },
+          { text: "x".repeat(i + 1) },
+        ),
+      );
+    }
+    const before = (await h["compile.list_codify_candidates"]({ limit: 10 })) as {
+      candidates: Array<{ cluster_id: string; cluster_signature: string }>;
+    };
+    expect(before.candidates.length).toBeGreaterThan(0);
+    const sig = before.candidates[0]!.cluster_signature;
+
+    await nia.vaultWrite({
+      kind: "negative",
+      cluster_signature: sig,
+      reason: "creative_task",
+      retry_policy: {
+        type: "sticky",
+        retry_on_distribution_shift: false,
+        retry_on_code_change: false,
+      },
+      trace_count_at_decision: 30,
+      created_at: new Date().toISOString(),
+    });
+
+    const after = (await h["compile.list_codify_candidates"]({ limit: 10 })) as {
+      candidates: Array<{ cluster_signature: string }>;
+    };
+    expect(after.candidates.find((c) => c.cluster_signature === sig)).toBeUndefined();
+  });
+
   it("estimate_savings returns axis scores + per-tier projections", async () => {
     for (let i = 0; i < 30; i++) {
       await h["compile.observe_call"](
