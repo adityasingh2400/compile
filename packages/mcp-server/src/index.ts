@@ -2,42 +2,67 @@
  * @compile/mcp — the MCP server agents install via:
  *   claude mcp add compile -- npx @compile/mcp
  *
- * Exposes 7 tools (see DESIGN.md). All handlers are stubs at scaffold time;
- * Lane A wires them to identification + routing + synthesis pipelines.
+ * Lane A1: request_synthesis + submit_synthesis are wired end-to-end.
+ * Other 5 tools validate input via Zod and return "not implemented".
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { MCP_TOOLS, type McpToolName } from "@compile/schemas";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { StubNiaClient } from "@compile/nia";
+import { MemoryRequestStore } from "./store.js";
+import { buildHandlers, TOOLS, TOOL_DESCRIPTIONS } from "./handlers.js";
+import type { McpToolName } from "@compile/schemas";
+
+const nia = new StubNiaClient();
+const store = new MemoryRequestStore();
+const handlers = buildHandlers({ nia, store });
 
 const server = new Server(
   { name: "compile", version: "0.0.0" },
   { capabilities: { tools: {} } },
 );
 
-const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
-  "compile.observe_call": "Log an LLM call receipt to the identification pipeline.",
-  "compile.find_function":
-    "Three-state lookup against Nia Vault: positive hit / negative hit / unknown.",
-  "compile.run_codified": "Execute a codified function (Tier 1 or Tier 2).",
-  "compile.list_codify_candidates":
-    "Ranked clusters that passed 3-axis scoring; powers the 48h report.",
-  "compile.request_synthesis":
-    "Returns a synthesis spec. The CALLING agent runs codegen on its own LLM keys.",
-  "compile.submit_synthesis":
-    "Agent submits emitted code; Compile validates against private holdout, gates ≥98%.",
-  "compile.estimate_savings":
-    "Projected $ savings per tier with break-even formula.",
-};
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: (Object.keys(TOOLS) as McpToolName[]).map((name) => ({
+    name,
+    description: TOOL_DESCRIPTIONS[name],
+    inputSchema: zodToJsonSchema(TOOLS[name].input, { target: "openApi3" }) as Record<
+      string,
+      unknown
+    >,
+  })),
+}));
 
-// TODO(lane-A): replace stub handlers with real pipeline calls.
-for (const name of Object.keys(MCP_TOOLS) as McpToolName[]) {
-  void name;
-  void TOOL_DESCRIPTIONS;
-}
+server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  const name = req.params.name as McpToolName;
+  const handler = handlers[name];
+  if (!handler) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `unknown tool: ${String(name)}` }],
+    };
+  }
+  try {
+    const result = await handler(req.params.arguments ?? {});
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (err) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: (err as Error).message }],
+    };
+  }
+});
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  console.error("[compile-mcp] listening on stdio");
 }
 
 main().catch((err) => {
