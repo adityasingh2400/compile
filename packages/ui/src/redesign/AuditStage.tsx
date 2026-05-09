@@ -58,92 +58,70 @@ const SCAN_FILES = [
 
 // ─────────────────────────────────────────────────────────────────────
 // Audit driver — runs the timed walk through the five phases. Wires the
-// store; resilient to remount via the `started` ref.
+// store; idempotent across StrictMode double-mounts via a module-level
+// singleton so the timeline survives unmount/remount cycles.
+
+const AUDIT_DRIVER = { started: false };
+
+async function runAuditTimeline(): Promise<void> {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const s = () => useRedesignStore.getState();
+
+  // ── BOOT ───────────────────────────────────────────────────────────
+  s().setAuditPhase("boot");
+  for (let i = 0; i < BOOT_LINES.length; i++) {
+    s().bumpBootLines();
+    await sleep(180);
+  }
+  await sleep(340);
+
+  // ── SCANNING ───────────────────────────────────────────────────────
+  s().setAuditPhase("scanning");
+  for (let i = 0; i < SCAN_FILES.length; i++) {
+    s().setFilesScanned(i + 1);
+    for (let k = 0; k < 18; k++) {
+      s().bumpAstTokens(40 + Math.floor(Math.random() * 60));
+      await sleep(14);
+    }
+    await sleep(120);
+  }
+  await sleep(380);
+
+  // ── CLASSIFYING ────────────────────────────────────────────────────
+  s().setAuditPhase("classifying");
+  for (const site of AUDIT_CALL_SITES) {
+    s().pushClassified(site);
+    await sleep(280);
+  }
+  await sleep(520);
+
+  // ── FILTERING ──────────────────────────────────────────────────────
+  s().setAuditPhase("filtering");
+  s().setFiltered(true);
+  await sleep(2200);
+
+  // ── MANIFEST ───────────────────────────────────────────────────────
+  s().setAuditPhase("manifest");
+  await sleep(3300);
+
+  // ── TRANSITION → WORKSPACE ────────────────────────────────────────
+  s().setAuditPhase("transition");
+  await sleep(900);
+  s().setAuditPhase("complete");
+  s().setUiStage("workspace");
+}
 
 function useAuditDriver(): void {
-  const setUiStage = useRedesignStore((s) => s.setUiStage);
-  const setPhase = useRedesignStore((s) => s.setAuditPhase);
-  const bumpBoot = useRedesignStore((s) => s.bumpBootLines);
-  const setFiles = useRedesignStore((s) => s.setFilesScanned);
-  const bumpAst = useRedesignStore((s) => s.bumpAstTokens);
-  const pushClassified = useRedesignStore((s) => s.pushClassified);
-  const setFiltered = useRedesignStore((s) => s.setFiltered);
-  const phase = useRedesignStore((s) => s.audit.phase);
-
-  const started = useRef(false);
-
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-
-    let cancelled = false;
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-    (async () => {
-      // ── BOOT ───────────────────────────────────────────────────────
-      setPhase("boot");
-      for (let i = 0; i < BOOT_LINES.length; i++) {
-        if (cancelled) return;
-        bumpBoot();
-        await sleep(180);
-      }
-      await sleep(340);
-
-      // ── SCANNING ───────────────────────────────────────────────────
-      setPhase("scanning");
-      for (let i = 0; i < SCAN_FILES.length; i++) {
-        if (cancelled) return;
-        setFiles(i + 1);
-        // chunky AST counter ramp keeps the right column lively
-        for (let k = 0; k < 18; k++) {
-          if (cancelled) return;
-          bumpAst(40 + Math.floor(Math.random() * 60));
-          await sleep(14);
-        }
-        await sleep(120);
-      }
-      await sleep(380);
-
-      // ── CLASSIFYING ────────────────────────────────────────────────
-      setPhase("classifying");
-      for (const site of AUDIT_CALL_SITES) {
-        if (cancelled) return;
-        pushClassified(site);
-        await sleep(280);
-      }
-      await sleep(520);
-
-      // ── FILTERING ──────────────────────────────────────────────────
-      setPhase("filtering");
-      setFiltered(true);
-      await sleep(2200);
-
-      // ── MANIFEST ───────────────────────────────────────────────────
-      setPhase("manifest");
-      await sleep(3300);
-
-      // ── TRANSITION ─────────────────────────────────────────────────
-      setPhase("transition");
-      await sleep(900);
-      setPhase("complete");
-      setUiStage("workspace");
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    setPhase,
-    bumpBoot,
-    setFiles,
-    bumpAst,
-    pushClassified,
-    setFiltered,
-    setUiStage,
-  ]);
-
-  // Expose phase for downstream components without re-fetching.
-  void phase;
+    if (AUDIT_DRIVER.started) return;
+    AUDIT_DRIVER.started = true;
+    runAuditTimeline().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error("[audit] timeline failed", err);
+    });
+    // Intentionally no cleanup — timeline runs to completion regardless
+    // of remounts. The store is the single source of truth.
+  }, []);
 }
 
 // ─────────────────────────────────────────────────────────────────────

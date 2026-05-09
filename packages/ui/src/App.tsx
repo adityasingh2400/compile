@@ -1,82 +1,153 @@
-import { useEffect } from "react";
-import { UnifiedDashboard } from "./components/unified/UnifiedDashboard.js";
-import {
-  runUnifiedTimeline,
-  runFakeDaemonMeta,
-} from "./demo/unified-timeline.js";
-import { useUnifiedStore, STAGES } from "./unified-store.js";
-
 /**
- * App shell — boots the unified-dashboard timeline + fake daemon
- * meta, then renders the single-canvas observation surface.
+ * Compile redesign — App shell.
  *
- * The earlier 11-page PowerPoint flow has been retired in favor of
- * a single dashboard with four canvas-shaped stages
- * (audit → cluster → codify → route) plus workflow tabs.
+ * Two top-level stages, driven by the redesign store's `ui_stage`:
+ *
+ *   audit        →  full-screen Tensorlake sandbox + repo audit animation.
+ *                   When the audit completes, ui_stage flips to "workspace"
+ *                   and the audit screen folds out.
+ *   workspace    →  per-workflow tabbed flow. Each tab walks through
+ *                   synthesis → codification → production via
+ *                   useWorkflowDriver().
+ *
+ * Keyboard shortcuts (when not focused in an input):
+ *
+ *   1 / 2 / 3      switch active workflow tab
+ *   ← / →          step pipeline stage backward / forward within active tab
+ *   q / w / e      jump directly to synthesis / codification / production
+ *   r              reset everything → audit
+ *
+ * Note: this redesign supersedes the legacy 11-page Dashboard. A
+ * parallel `components/unified/*` implementation (built by another agent
+ * in the same session) is left in tree but not mounted here.
  */
+
+import { useEffect } from "react";
+import {
+  useRedesignStore,
+  type PipelineStage,
+} from "./data/redesign-store.js";
+import { CODIFIABLE_WORKFLOWS } from "./data/workflows.js";
+import { AuditStage } from "./redesign/AuditStage.js";
+import { Workspace } from "./redesign/Workspace.js";
+
+const PIPELINE_ORDER: PipelineStage[] = [
+  "synthesis",
+  "codification",
+  "production",
+];
+
 export function App(): JSX.Element {
-  const setStage = useUnifiedStore((s) => s.setStage);
-  const setActive = useUnifiedStore((s) => s.setActiveWorkflow);
-  const setManualOverride = useUnifiedStore((s) => s.setManualOverride);
-  const reset = useUnifiedStore((s) => s.reset);
+  const stage = useRedesignStore((s) => s.ui_stage);
+  const auditPhase = useRedesignStore((s) => s.audit.phase);
+  const setActiveWorkflow = useRedesignStore((s) => s.setActiveWorkflow);
+  const setPipelineStage = useRedesignStore((s) => s.setPipelineStage);
+  const resetAll = useRedesignStore((s) => s.resetAll);
 
   useEffect(() => {
-    const t = runUnifiedTimeline();
-    const d = runFakeDaemonMeta();
-    return () => {
-      t.stop();
-      d.stop();
-    };
-  }, []);
-
-  // operator hotkeys — sane to keep for live demos
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent): void => {
       if (e.target instanceof HTMLInputElement) return;
-      if (e.key === "ArrowRight" || e.key === " ") {
-        e.preventDefault();
-        const cur = useUnifiedStore.getState().stage;
-        const idx = STAGES.indexOf(cur);
-        const next = STAGES[Math.min(STAGES.length - 1, idx + 1)];
+      if (e.target instanceof HTMLTextAreaElement) return;
+      const state = useRedesignStore.getState();
+      const activeId = state.active_workflow_id;
+      const slice = activeId ? state.workflows[activeId] : null;
+      const cur = slice?.pipeline ?? "synthesis";
+
+      if (e.key >= "1" && e.key <= "9") {
+        const idx = parseInt(e.key, 10) - 1;
+        const wf = CODIFIABLE_WORKFLOWS[idx];
+        if (wf) {
+          e.preventDefault();
+          setActiveWorkflow(wf.id);
+        }
+        return;
+      }
+
+      if (e.key === "ArrowRight") {
+        if (!activeId) return;
+        const i = PIPELINE_ORDER.indexOf(cur);
+        const next = PIPELINE_ORDER[Math.min(PIPELINE_ORDER.length - 1, i + 1)];
         if (next) {
-          setManualOverride(true);
-          setStage(next);
+          e.preventDefault();
+          setPipelineStage(activeId, next);
         }
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        const cur = useUnifiedStore.getState().stage;
-        const idx = STAGES.indexOf(cur);
-        const prev = STAGES[Math.max(0, idx - 1)];
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        if (!activeId) return;
+        const i = PIPELINE_ORDER.indexOf(cur);
+        const prev = PIPELINE_ORDER[Math.max(0, i - 1)];
         if (prev) {
-          setManualOverride(true);
-          setStage(prev);
+          e.preventDefault();
+          setPipelineStage(activeId, prev);
         }
-      } else if (e.key === "r" || e.key === "R") {
-        reset();
-        // restart the timeline
-        const t = runUnifiedTimeline();
-        // intentionally don't return cleanup — timeline manages itself.
-        void t;
-      } else if (e.key === "1" || e.key === "2" || e.key === "3") {
-        const i = parseInt(e.key, 10) - 1;
-        const w = useUnifiedStore.getState().workflows[i];
-        if (w) {
-          setManualOverride(true);
-          setActive(w.id);
+        return;
+      }
+      if (e.key === "q" || e.key === "Q") {
+        if (activeId) {
+          e.preventDefault();
+          setPipelineStage(activeId, "synthesis");
         }
-      } else if (e.key >= "4" && e.key <= "7") {
-        // 4..7 maps to stages 1..4 (audit/cluster/codify/route)
-        const i = parseInt(e.key, 10) - 4;
-        const target = STAGES[i];
-        if (target) {
-          setManualOverride(true);
-          setStage(target);
+        return;
+      }
+      if (e.key === "w" || e.key === "W") {
+        if (activeId) {
+          e.preventDefault();
+          setPipelineStage(activeId, "codification");
         }
+        return;
+      }
+      if (e.key === "e" || e.key === "E") {
+        if (activeId) {
+          e.preventDefault();
+          setPipelineStage(activeId, "production");
+        }
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        resetAll();
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reset, setActive, setManualOverride, setStage]);
+  }, [setActiveWorkflow, setPipelineStage, resetAll]);
 
-  return <UnifiedDashboard />;
+  const showAudit = stage === "audit" || auditPhase === "transition";
+  const showWorkspace = stage === "workspace";
+  const folding = auditPhase === "transition";
+
+  return (
+    <div className="rd-app">
+      {showAudit ? (
+        <div className={`rd-audit-layer ${folding ? "folding-out" : ""}`}>
+          <AuditStage />
+        </div>
+      ) : null}
+      {showWorkspace ? (
+        <div className="rd-workspace-layer">
+          <Workspace />
+        </div>
+      ) : null}
+      <div className="rd-hotkeys">
+        <span>tabs</span>
+        <kbd>1</kbd>
+        <kbd>2</kbd>
+        <kbd>3</kbd>
+        <span className="sep">·</span>
+        <span>stages</span>
+        <kbd>←</kbd>
+        <kbd>→</kbd>
+        <span className="sep">·</span>
+        <span>jump</span>
+        <kbd>q</kbd>
+        <kbd>w</kbd>
+        <kbd>e</kbd>
+        <span className="sep">·</span>
+        <span>reset</span>
+        <kbd>r</kbd>
+      </div>
+    </div>
+  );
 }
