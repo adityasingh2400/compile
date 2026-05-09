@@ -1,23 +1,28 @@
 /**
- * Audit stage — the opening act.
+ * Audit stage — organic / panel-less.
  *
- * Renders the Compile agent operating inside a Tensorlake sandbox while
- * it audits the repo. End state: a clean list of codifiable workflows
- * that promote into tabs in the workspace.
+ * The compile agent boots inside a Tensorlake sandbox, scans the
+ * Nozomio repo, and identifies production LLM workflows. For each
+ * workflow we surface ~16 *synthetic call samples* — micro inputs
+ * the codifier will fan out across — so judges immediately see what
+ * each workflow actually handles in production.
  *
- * Five visible sub-phases (driven by `useAuditDriver`):
+ * Visual rules (Claude-style cream + maroon palette):
+ *   · NO rectangular cards. Type, dots, and soft auras only.
+ *   · Each workflow is a column of (display name → description →
+ *     synthetic-call nodes radiating out).
+ *   · One node per workflow is "active" at any time — its label
+ *     prints into a streaming line above the column. Cycles every
+ *     ~700ms.
+ *   · Sub-pattern clusters are conveyed by hue (different maroon
+ *     tints) and gentle proximity, not boxes.
+ *   · Manifest reveal at the end is plain centered type, no panels.
  *
- *   boot         · sandbox materializes, shell-style boot logs scroll
- *   scanning     · AST tokens stream, file tree fills, hits register
- *   classifying  · each call site lands in the right column with a tier
- *   filtering    · negatives dim, codifiables pulse green
- *   manifest     · large "N codifiable workflows" reveal + tab pill morph
- *
- * The component uses no external animation library — it's straight
- * React state + a few canvas particles for the boot / sandbox visual.
+ * Phase machine is unchanged from the previous AuditStage:
+ *   boot → scanning → classifying → filtering → manifest → transition
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useRedesignStore,
   type AuditPhase,
@@ -25,95 +30,15 @@ import {
 import {
   AUDIT_CALL_SITES,
   CODIFIABLE_WORKFLOWS,
-  REPO_PATH,
   type Workflow,
 } from "../data/workflows.js";
+import { getSamplePack } from "./synthetic-call-samples.js";
+
+const REPO_DISPLAY = "nozomio/personal-agent";
 
 // ─────────────────────────────────────────────────────────────────────
-// Boot lines — typewriter into the sandbox terminal.
-//
-// `buildBootLines()` substitutes the real sandbox_id and resources from
-// `tensorlake-status.json` when prewarm has written it; otherwise the
-// canned values keep the offline demo readable.
+// Audit driver — singleton timeline survives StrictMode double-mounts.
 
-interface BootLine {
-  ts: string;
-  level: "info" | "ok" | "warn";
-  text: string;
-}
-
-function buildBootLines(args: {
-  live: boolean;
-  sandboxId: string;
-  image: string;
-  cpus: number;
-  memMb: number;
-}): BootLine[] {
-  const memGb =
-    args.memMb >= 1024 ? `${(args.memMb / 1024).toFixed(args.memMb % 1024 === 0 ? 0 : 1)}GB` : `${args.memMb}MB`;
-  return [
-    {
-      ts: "00:00.013",
-      level: "info",
-      text: `tensorlake.Sandbox.create({ image: '${args.image}', cpus: ${args.cpus}, memoryMb: ${args.memMb} })`,
-    },
-    { ts: "00:00.214", level: "info", text: "  · pulling layers — base, node22, ts-morph, tree-sitter" },
-    {
-      ts: "00:00.731",
-      level: "info",
-      text: `  · microvm boot · alloc ${args.cpus} vCPU / ${memGb} · region us-west-2`,
-    },
-    {
-      ts: "00:01.027",
-      level: "ok",
-      text: `✓ sandbox ready · ${args.sandboxId}${args.live ? "" : ""} · ${args.live ? "real cold start" : "4012ms cold start"}`,
-    },
-    { ts: "00:01.044", level: "info", text: `agent.audit({ repo: '${REPO_PATH}' })` },
-    { ts: "00:01.061", level: "info", text: "  · git rev-parse HEAD → a3f2d1b" },
-    { ts: "00:01.118", level: "info", text: "  · ts-morph project · loading tsconfig.json" },
-    { ts: "00:01.420", level: "ok", text: "✓ project loaded · 38 source files · 4 packages" },
-    {
-      ts: "00:01.460",
-      level: "info",
-      text: "scanner.findCallSites({ providers: ['openai','anthropic','google'] })",
-    },
-  ];
-}
-
-/** Default canned values used by the audit driver before tensorlake-status.json
- *  has loaded. The driver only reads the COUNT — content is component-side. */
-const DEFAULT_BOOT_LINES = buildBootLines({
-  live: false,
-  sandboxId: "sb_audit_4f12ae",
-  image: "compile-audit-agent",
-  cpus: 4,
-  memMb: 8192,
-});
-
-const BOOT_LINES = DEFAULT_BOOT_LINES;
-
-const SCAN_FILES = [
-  "src/index.ts",
-  "src/router.ts",
-  "src/icp.ts",
-  "src/ops.ts",
-  "src/utils/parse.ts",
-  "src/utils/format.ts",
-  "src/llm/openai.ts",
-  "src/llm/anthropic.ts",
-  "package.json",
-  "tsconfig.json",
-];
-
-// ─────────────────────────────────────────────────────────────────────
-// Audit driver — runs the timed walk through the five phases. Wires the
-// store; idempotent across StrictMode double-mounts via a module-level
-// singleton so the timeline survives unmount/remount cycles.
-
-/**
- * Module-level guard — survives StrictMode double-mounts. Exposed via
- * `resetAuditDriver()` so the reset hotkey can re-run the audit.
- */
 const AUDIT_DRIVER = { started: false };
 
 export function resetAuditDriver(): void {
@@ -124,44 +49,47 @@ async function runAuditTimeline(): Promise<void> {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const s = () => useRedesignStore.getState();
 
-  // ── BOOT ───────────────────────────────────────────────────────────
+  // BOOT — short, just enough for the sandbox handshake to feel real
   s().setAuditPhase("boot");
-  for (let i = 0; i < BOOT_LINES.length; i++) {
+  for (let i = 0; i < 6; i++) {
     s().bumpBootLines();
-    await sleep(120);
+    await sleep(180);
+  }
+  await sleep(280);
+
+  // SCANNING — token meter scrolls while the repo readout types in
+  s().setAuditPhase("scanning");
+  const SCAN_FILES = 22;
+  for (let i = 0; i < SCAN_FILES; i++) {
+    s().setFilesScanned(i + 1);
+    for (let k = 0; k < 8; k++) {
+      s().bumpAstTokens(70 + Math.floor(Math.random() * 90));
+      await sleep(8);
+    }
+    await sleep(40);
   }
   await sleep(220);
 
-  // ── SCANNING ───────────────────────────────────────────────────────
-  s().setAuditPhase("scanning");
-  for (let i = 0; i < SCAN_FILES.length; i++) {
-    s().setFilesScanned(i + 1);
-    for (let k = 0; k < 12; k++) {
-      s().bumpAstTokens(60 + Math.floor(Math.random() * 80));
-      await sleep(10);
-    }
-    await sleep(70);
-  }
-  await sleep(240);
-
-  // ── CLASSIFYING ────────────────────────────────────────────────────
+  // CLASSIFYING — workflows pop in one at a time
   s().setAuditPhase("classifying");
   for (const site of AUDIT_CALL_SITES) {
     s().pushClassified(site);
-    await sleep(160);
+    await sleep(220);
   }
-  await sleep(340);
+  await sleep(420);
 
-  // ── FILTERING ──────────────────────────────────────────────────────
+  // FILTERING — synthetic calls fan out (visual is driven from
+  // the node enumerator below; we just hold this phase long enough
+  // for the columns to fully emit + cycle a few active labels)
   s().setAuditPhase("filtering");
   s().setFiltered(true);
-  await sleep(1400);
+  await sleep(8200);
 
-  // ── MANIFEST ───────────────────────────────────────────────────────
+  // MANIFEST — settle, summarize
   s().setAuditPhase("manifest");
-  await sleep(2400);
+  await sleep(3200);
 
-  // ── TRANSITION → WORKSPACE ────────────────────────────────────────
+  // TRANSITION → WORKSPACE
   s().setAuditPhase("transition");
   await sleep(700);
   s().setAuditPhase("complete");
@@ -176,199 +104,125 @@ function useAuditDriver(): void {
       // eslint-disable-next-line no-console
       console.error("[audit] timeline failed", err);
     });
-    // Intentionally no cleanup — timeline runs to completion regardless
-    // of remounts. The store is the single source of truth.
   }, []);
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Components.
+// Header — minimal chrome. Pure type. No panel.
 
-function PhaseIndicator(): JSX.Element {
-  const phase = useRedesignStore((s) => s.audit.phase);
-  const labels: { id: AuditPhase; label: string }[] = [
-    { id: "boot", label: "sandbox boot" },
-    { id: "scanning", label: "scan repo" },
-    { id: "classifying", label: "classify" },
-    { id: "filtering", label: "filter" },
-    { id: "manifest", label: "manifest" },
-  ];
-  const idx = labels.findIndex((l) => l.id === phase);
-  return (
-    <div className="audit-phase-strip">
-      {labels.map((l, i) => {
-        const cur = i === idx;
-        const done = i < idx;
-        return (
-          <div
-            key={l.id}
-            className={`audit-phase-step ${cur ? "current" : ""} ${done ? "done" : ""}`}
-          >
-            <span className="num">{(i + 1).toString().padStart(2, "0")}</span>
-            <span className="label">{l.label}</span>
-            {cur ? <span className="dot pulse" /> : <span className="dot" />}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Small starfield canvas behind everything — pure aesthetic. */
-function SandboxParticles(): JSX.Element {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const resize = () => {
-      canvas.width = canvas.clientWidth * dpr;
-      canvas.height = canvas.clientHeight * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    resize();
-    window.addEventListener("resize", resize);
-    const N = 280;
-    const px = new Float32Array(N);
-    const py = new Float32Array(N);
-    const pv = new Float32Array(N);
-    for (let i = 0; i < N; i++) {
-      px[i] = Math.random();
-      py[i] = Math.random();
-      pv[i] = 0.04 + Math.random() * 0.18;
-    }
-    let raf = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
-      ctx.fillStyle = "rgba(255, 247, 240, 0.55)";
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = "rgba(122, 223, 255, 0.55)";
-      for (let i = 0; i < N; i++) {
-        py[i] = py[i]! + pv[i]! * dt;
-        if (py[i]! > 1) {
-          py[i] = 0;
-          px[i] = Math.random();
-        }
-        const x = px[i]! * w;
-        const y = py[i]! * h;
-        ctx.fillRect(x, y, 1.2, 1.2);
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
-    };
-  }, []);
-  return <canvas ref={ref} className="audit-particles" />;
-}
-
-function SandboxFrame(): JSX.Element {
+function AuditHeader(): JSX.Element {
   const phase = useRedesignStore((s) => s.audit.phase);
   const tl = useRedesignStore((s) => s.tensorlake);
-
-  // When prewarm wrote a real tensorlake-status.json, the sandbox_id /
-  // resources / image fields below are LIVE values straight from the
-  // Tensorlake SDK. Falls through to canned values offline so the demo
-  // still flows when keys aren't set.
   const live = tl.connected && tl.sandbox_id != null;
-  const sandboxId = tl.sandbox_id ?? "sb_audit_4f12ae";
-  const image = tl.image ?? "compile-audit-agent";
-  const cpus = tl.cpus ?? 4;
-  const memMb = tl.memory_mb ?? 8192;
-  const memDisplay =
-    memMb >= 1024 ? `${(memMb / 1024).toFixed(memMb % 1024 === 0 ? 0 : 1)} GB` : `${memMb} MB`;
-  const region = "us-west-2";
+
+  const phaseLabel = (() => {
+    switch (phase) {
+      case "boot":
+        return "spawning sandbox";
+      case "scanning":
+        return "scanning repo";
+      case "classifying":
+        return "identifying workflows";
+      case "filtering":
+        return "fanning out synthetic calls";
+      case "manifest":
+      case "transition":
+        return "audit complete";
+      default:
+        return "ready";
+    }
+  })();
 
   return (
-    <div className={`audit-sandbox-frame audit-phase-${phase}`}>
-      <div className="audit-sandbox-corners">
-        <span className="corner tl" />
-        <span className="corner tr" />
-        <span className="corner bl" />
-        <span className="corner br" />
+    <header className="audit-org-header">
+      <div className="audit-org-mark">
+        <span className="audit-org-mark-dot" aria-hidden />
+        <span className="audit-org-mark-name">Compile</span>
+        <span className="audit-org-mark-sep">·</span>
+        <span className="audit-org-mark-task">audit</span>
       </div>
-      <div className="audit-sandbox-meta">
-        <span className={`dot ${live ? "live" : ""}`} />
-        <span>tensorlake sandbox</span>
-        <span className="sep">·</span>
-        <span title={live ? "real Tensorlake sandbox id" : "canned (offline mode)"}>{sandboxId}</span>
-        <span className="sep">·</span>
-        <span>image={image}</span>
-        <span className="sep">·</span>
-        <span>region={region}</span>
-        <span className="sep">·</span>
-        <span>
-          {cpus} vCPU · {memDisplay}
+
+      <div className="audit-org-repo">
+        <span className="audit-org-repo-arrow" aria-hidden>↳</span>
+        <span className="audit-org-repo-path">{REPO_DISPLAY}</span>
+        <span className="audit-org-repo-rev">@a3f2d1b</span>
+      </div>
+
+      <div className="audit-org-phase">
+        <span className={`audit-org-phase-dot ${phase}`} aria-hidden />
+        <span className="audit-org-phase-text">{phaseLabel}</span>
+        <span className="audit-org-phase-sep">·</span>
+        <span className={`audit-org-svc ${live ? "live" : "offline"}`}>
+          tensorlake {live ? "live" : "offline"}
         </span>
-        {live ? (
-          <>
-            <span className="sep">·</span>
-            <span className="audit-live-tag" title={`spawned ${tl.created_at ?? "—"} from ${tl.source ?? "prewarm"}`}>
-              ◉ live
-            </span>
-          </>
-        ) : null}
       </div>
-    </div>
+    </header>
   );
 }
 
-function BootTerminal(): JSX.Element {
-  const emitted = useRedesignStore((s) => s.audit.boot_lines_emitted);
+// ─────────────────────────────────────────────────────────────────────
+// Repo readout — appears during scanning. No box; just a streaming
+// type-out of the directory tree.
+
+const REPO_TREE_LINES = [
+  "  ├── src/agent/",
+  "  │   ├── intent.ts        ← classify_message_intent",
+  "  │   ├── urgency.ts       ← score_message_urgency",
+  "  │   ├── warmth.ts        ← score_relationship_warmth",
+  "  │   ├── events.ts        ← extract_event_from_message",
+  "  │   └── memory.ts        ← summarize_thread_for_memory",
+  "  ├── src/llm/openai.ts",
+  "  ├── src/llm/anthropic.ts",
+  "  ├── prompts/",
+  "  └── package.json",
+];
+
+function RepoReadout(): JSX.Element | null {
   const phase = useRedesignStore((s) => s.audit.phase);
-  const tl = useRedesignStore((s) => s.tensorlake);
+  const filesScanned = useRedesignStore((s) => s.audit.files_scanned);
+  const tokens = useRedesignStore((s) => s.audit.ast_tokens_seen);
 
-  // Substitute live values into the boot lines when we have them. The
-  // driver only ticks `boot_lines_emitted`; the content rendered here
-  // is computed per-render so a late-arriving prewarm fetch upgrades
-  // the visible terminal mid-boot.
-  const lines = useMemo(() => {
-    const live = tl.connected && tl.sandbox_id != null;
-    if (!live) return BOOT_LINES;
-    return buildBootLines({
-      live: true,
-      sandboxId: tl.sandbox_id ?? "sb_audit_4f12ae",
-      image: tl.image ?? "compile-audit-agent",
-      cpus: tl.cpus ?? 4,
-      memMb: tl.memory_mb ?? 8192,
-    });
-  }, [tl.connected, tl.sandbox_id, tl.image, tl.cpus, tl.memory_mb]);
+  if (phase !== "scanning" && phase !== "boot") return null;
 
-  const visible = lines.slice(0, emitted);
-  const showCaret = phase === "boot" && emitted < lines.length;
+  // Reveal tree lines progressively as files scanned.
+  const treeReveal = Math.min(
+    REPO_TREE_LINES.length,
+    Math.floor((filesScanned / 22) * REPO_TREE_LINES.length),
+  );
+
   return (
-    <div className="audit-terminal">
-      <div className="audit-terminal-head">
-        <span className="t-dot red" />
-        <span className="t-dot yellow" />
-        <span className="t-dot green" />
-        <span className="t-title">agent.audit() · stdout</span>
-        {tl.connected && tl.sandbox_id != null ? (
-          <span className="t-live-tag" title="live tensorlake sandbox">
-            ◉ live
-          </span>
-        ) : null}
+    <div className="audit-org-readout">
+      <div className="audit-org-readout-head">
+        <span className="prompt">$</span>
+        <span>compile audit {REPO_DISPLAY}</span>
+        <span className="caret" />
       </div>
-      <div className="audit-terminal-body">
-        {visible.map((line, i) => (
-          <div key={i} className={`audit-term-line ${line.level}`}>
-            <span className="ts">{line.ts}</span>
-            <span className="text">{line.text}</span>
+      <div className="audit-org-readout-tree">
+        <div className="line dim">  {REPO_DISPLAY}/</div>
+        {REPO_TREE_LINES.slice(0, treeReveal).map((ln, i) => (
+          <div key={i} className="line">
+            {ln}
           </div>
         ))}
-        {showCaret ? <span className="audit-term-caret" /> : null}
+      </div>
+      <div className="audit-org-readout-meter">
+        <span>
+          <em>{filesScanned}</em> files
+        </span>
+        <span className="audit-org-readout-sep">·</span>
+        <span>
+          <em>{tokens.toLocaleString()}</em> ast tokens
+        </span>
+        <span className="audit-org-readout-sep">·</span>
+        <span>walking call graph · matching providers</span>
       </div>
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Workflow column — the big visual. No panel. Just a workflow name,
+// a description, and a constellation of synthetic-call nodes.
 
 function formatMoney(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -376,124 +230,239 @@ function formatMoney(n: number): string {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
-function inferBehaviorTags(wf: Workflow): string[] {
-  const tags: string[] = [];
-  // Prompt is short / templated → static prompt
-  if (wf.prompt_excerpt.length < 160) tags.push("static prompt");
-  // Has structured input shape → schema-bounded
-  if (wf.input_fields.length > 0) tags.push("typed input shape");
-  // Most workflows here use temp 0 / structured output
-  tags.push("temperature 0");
-  tags.push("structured output");
-  return tags;
-}
-
-function annualSpend(wf: Workflow): number {
-  return wf.monthly_calls * wf.per_call_cost_usd * 12;
+interface NodePlacement {
+  /** node x in [0, 1] within the column */
+  x: number;
+  y: number;
+  /** sub-cluster slug */
+  cluster: string;
+  /** label text */
+  label: string;
 }
 
 /**
- * Single-card description for one identified production workflow.
- * Streams in as the audit progresses through `classifying` → `manifest`.
+ * Deterministic placement so HMR / remount keeps nodes still.
+ * Tight golden-angle scatter inside the column with a small jitter
+ * keyed on (workflowIndex, nodeIndex) so workflows look unique.
  */
-function WorkflowIdentifiedCard({
-  workflow,
-  index,
-}: {
+function placeNodes(
+  workflowIndex: number,
+  samples: { label: string; cluster: string }[],
+): NodePlacement[] {
+  const out: NodePlacement[] = [];
+  // Pre-bucket by cluster so each cluster lives in roughly the same
+  // angular wedge — that's what gives the visual its grouping.
+  const byCluster = new Map<string, { label: string; cluster: string }[]>();
+  for (const s of samples) {
+    if (!byCluster.has(s.cluster)) byCluster.set(s.cluster, []);
+    byCluster.get(s.cluster)!.push(s);
+  }
+  const clusterOrder = [...byCluster.keys()];
+  const TAU = Math.PI * 2;
+  let placedIdx = 0;
+  clusterOrder.forEach((cluster, ci) => {
+    const arr = byCluster.get(cluster)!;
+    const wedgeStart = (ci / clusterOrder.length) * TAU;
+    const wedgeEnd = ((ci + 1) / clusterOrder.length) * TAU;
+    arr.forEach((s, j) => {
+      const t = (j + 0.5) / arr.length;
+      const angle = wedgeStart + t * (wedgeEnd - wedgeStart);
+      // Two visual rings; ring decided by sample index parity within cluster.
+      const ring = j % 2 === 0 ? 0.32 : 0.46;
+      // Jitter keyed on (workflowIndex, placedIdx) — deterministic per node.
+      const jitterSeed = (workflowIndex * 977 + placedIdx * 131) % 1000;
+      const jr = ((jitterSeed % 23) - 11) / 220; // ±0.05
+      const ja = ((jitterSeed % 17) - 8) / 70; // small angular jitter
+      const r = ring + jr;
+      const a = angle + ja;
+      const x = 0.5 + Math.cos(a) * r;
+      const y = 0.5 + Math.sin(a) * r * 0.78; // squash vertically
+      out.push({ x, y, cluster, label: s.label });
+      placedIdx += 1;
+    });
+  });
+  return out;
+}
+
+interface WorkflowColumnProps {
   workflow: Workflow;
   index: number;
-}): JSX.Element {
-  const tags = inferBehaviorTags(workflow);
-  const yearly = annualSpend(workflow);
-  const inputSummary = workflow.input_fields
-    .map((f) => f.name)
-    .slice(0, 6)
-    .join(", ");
-  const accentRgb = workflow.tier === "tier_2" ? "255, 179, 90" : "90, 252, 167";
+  /** When false, column is pre-revealed but nodes hidden. */
+  reveal: boolean;
+  /** When true, animate nodes (during filtering / manifest phases). */
+  emit: boolean;
+}
+
+function WorkflowColumn({
+  workflow,
+  index,
+  reveal,
+  emit,
+}: WorkflowColumnProps): JSX.Element {
+  const pack = useMemo(() => getSamplePack(workflow.function_name), [workflow.function_name]);
+  const placements = useMemo(
+    () => placeNodes(index, pack.samples),
+    [index, pack.samples],
+  );
+
+  // Number of nodes currently visible — emits one every 110ms while
+  // `emit` is true.
+  const [visible, setVisible] = useState(0);
+  useEffect(() => {
+    if (!emit) return;
+    let cancelled = false;
+    const start = performance.now();
+    const STAGGER = 90 + index * 25; // staggered fan-out across columns
+    const tick = (now: number): void => {
+      if (cancelled) return;
+      const n = Math.min(
+        placements.length,
+        Math.floor((now - start) / STAGGER),
+      );
+      setVisible(n);
+      if (n < placements.length) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+    };
+  }, [emit, placements.length, index]);
+
+  // Active node — cycles through visible nodes; its label streams
+  // into the headline above the column.
+  const [activeIdx, setActiveIdx] = useState(0);
+  useEffect(() => {
+    if (visible === 0) return;
+    const interval = window.setInterval(() => {
+      setActiveIdx((i) => (i + 1) % visible);
+    }, 720);
+    return () => window.clearInterval(interval);
+  }, [visible]);
+
+  const activeSample = visible > 0 ? placements[activeIdx % visible] : null;
+
+  const yearly = workflow.monthly_calls * workflow.per_call_cost_usd * 12;
+  const tierLabel = workflow.tier === "tier_2" ? "tier 2 · phi-3-mini" : "tier 1 · vault";
 
   return (
-    <article
-      className={`audit-wf-card ${workflow.tier}`}
-      style={{
-        animationDelay: `${index * 110}ms`,
-        ["--accent" as never]: accentRgb,
-      }}
+    <div
+      className={`audit-org-wf ${reveal ? "is-revealed" : ""} ${workflow.tier}`}
+      style={{ ["--wf-delay" as never]: `${index * 140}ms` }}
     >
-      <header className="audit-wf-card-head">
-        <span className="audit-wf-idx">
-          {(index + 1).toString().padStart(2, "0")}
+      <div className="audit-org-wf-meta">
+        <span className="audit-org-wf-num">{(index + 1).toString().padStart(2, "0")}</span>
+        <span className={`audit-org-wf-tier ${workflow.tier}`}>{tierLabel}</span>
+      </div>
+
+      <h2 className="audit-org-wf-name">
+        {workflow.display_name}
+      </h2>
+      <p className="audit-org-wf-desc">{workflow.description}</p>
+
+      <div className="audit-org-wf-stats">
+        <span>
+          <em>{(workflow.monthly_calls / 1000).toFixed(0)}k</em> calls / mo
         </span>
-        <div className="audit-wf-title-block">
-          <h3 className="audit-wf-fn">{workflow.function_name}</h3>
-          <div className="audit-wf-loc">
-            <span>{workflow.file_path}</span>
-            <span className="sep">·</span>
-            <span>{workflow.provider}</span>
-          </div>
-        </div>
-        <div className="audit-wf-traffic">
-          <div className="audit-wf-traffic-num">
-            {(workflow.monthly_calls / 1000).toFixed(0)}
-            <span className="unit">k</span>
-          </div>
-          <div className="audit-wf-traffic-lbl">calls / month</div>
-        </div>
-      </header>
-
-      <p className="audit-wf-desc">{workflow.description}</p>
-
-      <div className="audit-wf-prompt">
-        <span className="audit-wf-prompt-q">"</span>
-        {workflow.prompt_excerpt}
-        <span className="audit-wf-prompt-q">"</span>
+        <span className="sep">·</span>
+        <span>
+          <em>{formatMoney(yearly)}</em> annual spend
+        </span>
+        <span className="sep">·</span>
+        <span>
+          <em>{pack.clusters.length}</em> clusters
+        </span>
       </div>
 
-      <div className="audit-wf-stats">
-        <div className="audit-wf-stat">
-          <div className="audit-wf-stat-val">
-            {workflow.input_fields.length}
-            <span className="audit-wf-stat-sub">
-              {" "}
-              {workflow.input_fields.length === 1 ? "field" : "fields"}
-            </span>
-          </div>
-          <div className="audit-wf-stat-lbl">input shape</div>
-          <div className="audit-wf-stat-detail">{inputSummary}</div>
-        </div>
-        <div className="audit-wf-stat">
-          <div className="audit-wf-stat-val">
-            ${workflow.per_call_cost_usd.toFixed(3)}
-          </div>
-          <div className="audit-wf-stat-lbl">per call</div>
-          <div className="audit-wf-stat-detail">{workflow.provider} list price</div>
-        </div>
-        <div className="audit-wf-stat">
-          <div className="audit-wf-stat-val">{formatMoney(yearly)}</div>
-          <div className="audit-wf-stat-lbl">annual spend</div>
-          <div className="audit-wf-stat-detail">at current traffic</div>
-        </div>
+      {/* The active synthetic-call line — the game-changer the user
+          asked for. As nodes pop in, this line rotates through them
+          so judges read what each node actually represents. */}
+      <div className="audit-org-wf-active">
+        <span className="audit-org-wf-active-dot" aria-hidden />
+        <span className="audit-org-wf-active-prefix">running synthetic call:</span>
+        <span className="audit-org-wf-active-text">
+          {activeSample ? `"${activeSample.label}"` : "warming up…"}
+        </span>
       </div>
 
-      <div className="audit-wf-tags">
-        {tags.map((t) => (
-          <span key={t} className="audit-wf-tag">
-            {t}
-          </span>
-        ))}
+      <div className="audit-org-wf-canvas">
+        {/* soft halo — pure aesthetic, no border */}
+        <div className="audit-org-wf-halo" aria-hidden />
+
+        {/* Cluster tags float at the edge of the canvas. */}
+        {pack.clusters.map((c, ci) => {
+          // Place each tag near the centroid of nodes in that cluster
+          // so the tag visually belongs to its wedge. Pre-compute
+          // cluster center from placements.
+          const clusterNodes = placements.filter((p) => p.cluster === c.slug);
+          if (clusterNodes.length === 0) return null;
+          const cx =
+            clusterNodes.reduce((acc, n) => acc + n.x, 0) / clusterNodes.length;
+          const cy =
+            clusterNodes.reduce((acc, n) => acc + n.y, 0) / clusterNodes.length;
+          // Push tag slightly outward from the centroid for legibility.
+          const dx = cx - 0.5;
+          const dy = cy - 0.5;
+          const len = Math.max(0.02, Math.hypot(dx, dy));
+          const tx = 0.5 + (dx / len) * (Math.hypot(dx, dy) + 0.06);
+          const ty = 0.5 + (dy / len) * (Math.hypot(dx, dy) + 0.06);
+          const visibleCount = clusterNodes.filter((n) => {
+            const idx = placements.indexOf(n);
+            return idx < visible;
+          }).length;
+          return (
+            <div
+              key={c.slug}
+              className="audit-org-cluster-tag"
+              style={{
+                left: `${tx * 100}%`,
+                top: `${ty * 100}%`,
+                ["--cluster-delay" as never]: `${ci * 220 + 600}ms`,
+                opacity: visibleCount > 0 ? 1 : 0,
+              }}
+              data-cluster={c.slug}
+            >
+              <span className="audit-org-cluster-label">{c.label}</span>
+              <span className="audit-org-cluster-share">
+                {visibleCount}/{clusterNodes.length}
+              </span>
+            </div>
+          );
+        })}
+
+        {placements.map((p, i) => {
+          const isVisible = i < visible;
+          const isActive = activeSample === p;
+          return (
+            <div
+              key={i}
+              className={`audit-org-node ${isVisible ? "is-visible" : ""} ${isActive ? "is-active" : ""}`}
+              style={{
+                left: `${p.x * 100}%`,
+                top: `${p.y * 100}%`,
+                ["--node-delay" as never]: `${i * 18}ms`,
+              }}
+              data-cluster={p.cluster}
+            >
+              <span className="audit-org-node-dot" aria-hidden />
+              <span className="audit-org-node-label">{p.label}</span>
+            </div>
+          );
+        })}
       </div>
-    </article>
+    </div>
   );
 }
 
-function WorkflowsPanel(): JSX.Element {
-  const classified = useRedesignStore((s) => s.audit.classified);
-  const phase = useRedesignStore((s) => s.audit.phase);
-  const filesScanned = useRedesignStore((s) => s.audit.files_scanned);
-  const tokens = useRedesignStore((s) => s.audit.ast_tokens_seen);
+// ─────────────────────────────────────────────────────────────────────
+// Workflow grid — the centerpiece. Reveals one column per workflow as
+// the audit progresses through `classifying`. Once all are revealed,
+// `filtering` triggers the synthetic-call emission across columns.
 
-  // Derive identified workflows from the classified stream — only
-  // tier_1 / tier_2 entries become rich cards. Negatives are silently
-  // dropped from this surface (we no longer show the rejection list).
+function WorkflowGrid(): JSX.Element {
+  const phase = useRedesignStore((s) => s.audit.phase);
+  const classified = useRedesignStore((s) => s.audit.classified);
+
+  // Identified workflows in the order they were classified.
   const identifiedWorkflows = useMemo<Workflow[]>(() => {
     const ids = new Set<string>();
     const out: Workflow[] = [];
@@ -510,144 +479,82 @@ function WorkflowsPanel(): JSX.Element {
     return out;
   }, [classified]);
 
-  const totalSpend = useMemo(
-    () =>
-      identifiedWorkflows.reduce((acc, w) => acc + annualSpend(w), 0),
-    [identifiedWorkflows],
-  );
-  const totalCalls = useMemo(
-    () => identifiedWorkflows.reduce((acc, w) => acc + w.monthly_calls, 0),
-    [identifiedWorkflows],
-  );
+  const emit = phase === "filtering" || phase === "manifest" || phase === "transition";
 
-  const headline = (() => {
-    if (phase === "boot") return "spinning up sandbox…";
-    if (phase === "scanning") return "scanning repository";
-    if (phase === "classifying") return "identifying production workflows";
-    if (phase === "filtering") return "scoring candidates";
-    return "production workflows identified";
-  })();
-
-  const showEmpty =
-    identifiedWorkflows.length === 0 &&
-    (phase === "boot" || phase === "scanning");
+  if (identifiedWorkflows.length === 0) return <></>;
 
   return (
-    <section className="audit-workflows-panel">
-      <header className="audit-wf-panel-head">
-        <div className="audit-wf-panel-eyebrow">
-          <span className="dot" />
-          {headline}
-        </div>
-        <div className="audit-wf-panel-meters">
-          <div className="meter">
-            <span className="big">{filesScanned}</span>
-            <span className="lbl">files</span>
-          </div>
-          <div className="meter">
-            <span className="big">{tokens.toLocaleString()}</span>
-            <span className="lbl">ast tokens</span>
-          </div>
-          <div className="meter">
-            <span className="big">
-              {identifiedWorkflows.length}
-              <span className="dim"> / {CODIFIABLE_WORKFLOWS.length}</span>
-            </span>
-            <span className="lbl">workflows</span>
-          </div>
-          <div className="meter accent">
-            <span className="big">{formatMoney(totalSpend)}</span>
-            <span className="lbl">annual spend</span>
-          </div>
-          <div className="meter">
-            <span className="big">{(totalCalls / 1000).toFixed(0)}k</span>
-            <span className="lbl">calls/mo</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="audit-wf-list">
-        {showEmpty ? (
-          <div className="audit-wf-empty">
-            <span className="audit-wf-empty-pulse" />
-            <span>walking AST · resolving call graph · matching providers</span>
-          </div>
-        ) : null}
-
-        {identifiedWorkflows.map((wf, i) => (
-          <WorkflowIdentifiedCard key={wf.id} workflow={wf} index={i} />
-        ))}
-      </div>
-    </section>
+    <div
+      className={`audit-org-grid wf-count-${identifiedWorkflows.length}`}
+      data-phase={phase}
+    >
+      {identifiedWorkflows.map((wf, i) => (
+        <WorkflowColumn key={wf.id} workflow={wf} index={i} reveal emit={emit} />
+      ))}
+    </div>
   );
 }
 
-function ManifestOverlay(): JSX.Element | null {
+// ─────────────────────────────────────────────────────────────────────
+// Manifest reveal — clean centered type, no panel.
+
+function ManifestReveal(): JSX.Element | null {
   const phase = useRedesignStore((s) => s.audit.phase);
-  const visible =
-    phase === "manifest" || phase === "transition" || phase === "filtering";
-  const folding = phase === "transition";
-  if (!visible) return null;
+  if (phase !== "manifest" && phase !== "transition") return null;
+
   const codifiable = CODIFIABLE_WORKFLOWS;
   const totalSavings = codifiable.reduce(
     (acc, w) => acc + w.production.annual_savings_usd,
     0,
   );
-  const totalCalls = codifiable.reduce(
-    (acc, w) => acc + w.monthly_calls,
-    0,
-  );
+  const totalCalls = codifiable.reduce((acc, w) => acc + w.monthly_calls, 0);
+
   return (
-    <div className={`audit-manifest ${folding ? "folding" : ""}`}>
-      <div className="audit-manifest-eyebrow">audit complete</div>
-      <div className="audit-manifest-headline">
+    <div className={`audit-org-manifest ${phase === "transition" ? "is-folding" : ""}`}>
+      <div className="audit-org-manifest-eyebrow">audit complete</div>
+      <h2 className="audit-org-manifest-headline">
         <span className="num">{codifiable.length}</span>
-        <span className="lbl"> codifiable workflows</span>
-      </div>
-      <div className="audit-manifest-stats">
-        <div className="stat">
-          <span className="big">
-            {(totalCalls / 1000).toFixed(0)}
-            <span className="unit">k</span>
-          </span>
-          <span className="lbl">monthly calls codified</span>
-        </div>
-        <div className="stat green">
-          <span className="big">
-            ${(totalSavings / 1000).toFixed(1)}
-            <span className="unit">k</span>
-          </span>
-          <span className="lbl">projected annual savings</span>
-        </div>
-        <div className="stat">
-          <span className="big">7</span>
-          <span className="lbl">left in negative vault</span>
-        </div>
-      </div>
-      <div className="audit-manifest-list">
-        {codifiable.map((w, i) => (
-          <div
-            key={w.id}
-            className="audit-manifest-row"
-            style={{ animationDelay: `${i * 140}ms` }}
-          >
-            <span className="fn">{w.function_name}</span>
-            <span className="dim">·</span>
-            <span className="path">{w.file_path}</span>
-            <span className="dim">·</span>
-            <span className="vol">
-              {(w.monthly_calls / 1000).toFixed(0)}k/mo
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="audit-manifest-cta">
-        <span className="prompt">$</span>
-        <span className="text">
-          opening workspace · {codifiable.length} tabs · auto-routing
-        </span>
+        <span className="lbl">codifiable workflows</span>
+      </h2>
+      <p className="audit-org-manifest-sub">
+        <em>{(totalCalls / 1000).toFixed(0)}k</em> calls / mo will be lifted out
+        of the agent loop · projected <em>{formatMoney(totalSavings)}</em> annual
+        savings
+      </p>
+      <div className="audit-org-manifest-cta">
+        <span className="prompt">→</span>
+        <span>opening workspace</span>
         <span className="caret" />
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase ticker — minimal dotted progress line at the bottom.
+
+function PhaseTicker(): JSX.Element {
+  const phase = useRedesignStore((s) => s.audit.phase);
+  const labels: { id: AuditPhase; label: string }[] = [
+    { id: "boot", label: "boot" },
+    { id: "scanning", label: "scan" },
+    { id: "classifying", label: "identify" },
+    { id: "filtering", label: "synthesize" },
+    { id: "manifest", label: "ship" },
+  ];
+  const idx = labels.findIndex((l) => l.id === phase);
+  return (
+    <div className="audit-org-ticker">
+      {labels.map((l, i) => {
+        const cur = i === idx;
+        const done = i < idx;
+        return (
+          <span key={l.id} className={`tick ${cur ? "current" : ""} ${done ? "done" : ""}`}>
+            <span className="tick-dot" aria-hidden />
+            <span className="tick-label">{l.label}</span>
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -657,118 +564,26 @@ function ManifestOverlay(): JSX.Element | null {
 
 export function AuditStage(): JSX.Element {
   useAuditDriver();
-  const phase = useRedesignStore((s) => s.audit.phase);
-
-  // Keep a memoized class on the outer container — drives sandbox glow.
-  const containerCls = useMemo(() => `audit-stage stage-${phase}`, [phase]);
-
-  // Ambient phase title shown in the upper-right corner.
-  const title = (() => {
-    switch (phase) {
-      case "boot":
-        return "compile · agent · spinning up tensorlake sandbox";
-      case "scanning":
-        return "compile · agent · scanning repo";
-      case "classifying":
-        return "compile · agent · classifying call sites";
-      case "filtering":
-        return "compile · agent · filtering negatives";
-      case "manifest":
-      case "transition":
-        return "compile · agent · audit complete";
-      default:
-        return "compile · agent";
-    }
-  })();
 
   return (
-    <div className={containerCls}>
-      <SandboxParticles />
-      <div className="audit-shell">
-        <SandboxFrame />
-        <div className="audit-top">
-          <div className="audit-brand">
-            <span className="audit-brand-mark">●</span>
-            <b>compile</b>
-            <span className="dim">/ audit</span>
-            <ServiceStatusBadges />
-          </div>
-          <div className="audit-title">{title}</div>
-          <AuditLiveStats />
-        </div>
-        <div className="audit-grid">
-          <BootTerminal />
-          <WorkflowsPanel />
-        </div>
-        <PhaseIndicator />
-        <ManifestOverlay />
-      </div>
+    <div className="audit-org">
+      <div className="audit-org-grain" aria-hidden />
+      <div className="audit-org-glow" aria-hidden />
+
+      <AuditHeader />
+
+      <main className="audit-org-main">
+        <RepoReadout />
+        <WorkflowGrid />
+        <ManifestReveal />
+      </main>
+
+      <PhaseTicker />
     </div>
   );
 }
 
-/**
- * Small chrome badges showing whether Tensorlake + Nia are reachable.
- * `live` (green) = real round-trip succeeded via prewarm.
- * `offline` (gray) = no key, fetch failed, or prewarm not yet run.
- */
-function ServiceStatusBadges(): JSX.Element {
-  const tl = useRedesignStore((s) => s.tensorlake);
-  const nia = useRedesignStore((s) => s.nia);
-  return (
-    <div className="audit-svc-badges">
-      <span
-        className={`svc ${tl.connected ? "live" : "offline"}`}
-        title={
-          tl.connected
-            ? `tensorlake · sandbox=${tl.sandbox_id ?? "?"} · cpus=${tl.cpus ?? "?"} · mem=${tl.memory_mb ?? "?"}MB · ns=${tl.namespace ?? "?"}`
-            : "tensorlake · offline (run `npm run prewarm:ui` to connect)"
-        }
-      >
-        <span className="svc-dot" />
-        <span className="svc-name">tensorlake</span>
-        <span className="svc-state">{tl.connected ? "live" : "offline"}</span>
-      </span>
-      <span
-        className={`svc ${nia.connected ? "live" : "offline"}`}
-        title={
-          nia.connected
-            ? `nia · vault=${nia.vault_id ?? "?"} · reachable`
-            : "nia · offline (run `npm run prewarm:ui` to connect)"
-        }
-      >
-        <span className="svc-dot" />
-        <span className="svc-name">nia</span>
-        <span className="svc-state">{nia.connected ? "live" : "offline"}</span>
-      </span>
-    </div>
-  );
-}
-
-function AuditLiveStats(): JSX.Element {
-  const phase = useRedesignStore((s) => s.audit.phase);
-  const filesScanned = useRedesignStore((s) => s.audit.files_scanned);
-  const classified = useRedesignStore((s) => s.audit.classified);
-  const identified = classified.filter((c) => c.outcome !== "negative").length;
-  return (
-    <div className="audit-live-stats">
-      <div className="stat">
-        <span className="big">{filesScanned}</span>
-        <span className="lbl">files</span>
-      </div>
-      <span className="sep">·</span>
-      <div className="stat">
-        <span className="big">{identified}</span>
-        <span className="lbl">workflows</span>
-      </div>
-      <span className="sep">·</span>
-      <span className={`audit-stage-tag ${phase}`}>{phase}</span>
-    </div>
-  );
-}
-
-/** Used by the App shell to keep the audit screen mounted (folding) while
- *  the workspace mounts beneath, then unmount once the fold completes. */
+/** Used by the App shell to keep audit mounted while transition folds. */
 export function shouldShowAuditStage(phase: AuditPhase): boolean {
   return phase !== "complete";
 }
