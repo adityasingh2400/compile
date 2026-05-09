@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { transformSync } from "esbuild";
+import { Sandbox } from "tensorlake";
 import type { Trace } from "@compile/schemas";
 import { compileFunction } from "./executor.js";
 
@@ -137,34 +139,154 @@ export class LocalFakeTensorlakeClient implements ITensorlakeClient {
  *      ENG_REVIEW.md failure mode #2 calls for.
  */
 export interface RealTensorlakeOptions {
-  apiKey: string;
-  endpoint: string;
+  /** Defaults to env TENSORLAKE_API_KEY. Pass explicitly to override or for tests. */
+  apiKey?: string;
+  /** Tensorlake API base URL. Defaults to the SDK's cloud endpoint. */
+  endpoint?: string;
   /** Phi model name in Tensorlake's catalog (D1: "Phi-3-mini"). */
   phiModel?: string;
   /** Worker count for runEmittedFunction. Demo uses 64 (DESIGN.md). */
   workerCount?: number;
+  /** Sandbox sizing knobs. */
+  name?: string;
+  cpus?: number;
+  memoryMb?: number;
+  timeoutSecs?: number;
 }
 
 export class RealTensorlakeClient implements ITensorlakeClient {
-  constructor(private readonly opts: RealTensorlakeOptions) {}
+  /** Reused across calls within a session. Created lazily on first use,
+   * pre-warmed by `warm()`, kept alive until `close()`. Sharing one sandbox
+   * is the difference between ~600ms cold-start per call and ~400ms node
+   * exec per call. */
+  private sandbox: Sandbox | null = null;
+  private warming: Promise<void> | null = null;
 
-  async runEmittedFunction(_args: RunEmittedFunctionArgs): Promise<RunEmittedFunctionResult> {
-    // TODO(B2): wire @tensorlake/sdk sandbox primitive. Until then, the
-    // TensorlakeWithLocalFallback wrapper catches this and falls back to
-    // the LocalFake. Tests assert the fallback fires.
-    throw new Error("RealTensorlakeClient.runEmittedFunction: SDK not wired (TODO B2)");
+  constructor(private readonly opts: RealTensorlakeOptions = {}) {}
+
+  private async getSandbox(): Promise<Sandbox> {
+    if (this.sandbox) return this.sandbox;
+    if (!this.warming) {
+      this.warming = (async () => {
+        this.sandbox = await Sandbox.create({
+          name: this.opts.name ?? `compile-runtime-${Date.now()}`,
+          cpus: this.opts.cpus ?? 1,
+          memoryMb: this.opts.memoryMb ?? 1024,
+          timeoutSecs: this.opts.timeoutSecs ?? 1800,
+          ...(this.opts.apiKey ? { apiKey: this.opts.apiKey } : {}),
+          ...(this.opts.endpoint ? { apiUrl: this.opts.endpoint } : {}),
+        });
+      })();
+    }
+    await this.warming;
+    if (!this.sandbox) throw new Error("RealTensorlakeClient: sandbox creation failed");
+    return this.sandbox;
   }
 
-  async runPhi(_args: RunPhiArgs): Promise<RunPhiResult> {
-    // TODO(B2): wire Phi-3-mini hosted sandbox via @tensorlake/sdk.
-    throw new Error("RealTensorlakeClient.runPhi: SDK not wired (TODO B2)");
+  async runEmittedFunction(args: RunEmittedFunctionArgs): Promise<RunEmittedFunctionResult> {
+    const sandbox = await this.getSandbox();
+
+    // Transpile the agent-emitted TS locally (we own esbuild). Upload pure JS
+    // to the sandbox so we don't need to ship a build toolchain inside.
+    const stripped = args.code.replace(
+      /import\s*\{[^}]*llmFallback[^}]*\}\s*from\s*['"][^'"]+['"]\s*;?/g,
+      "",
+    );
+    const transpiled = transformSync(stripped, {
+      loader: "ts",
+      format: "esm",
+      target: "node20",
+      logLevel: "silent",
+    }).code;
+
+    // The runner shares the same llmFallback semantics as the in-process
+    // executor: throwing RUNTIME_FALLBACK / GATE_FAIL fails the trace and
+    // marks fallback_invoked. Output is one NDJSON record per holdout trace
+    // so a partial-failure run still streams what completed.
+    const runner = `\
+function llmFallback(_input, _name) {
+  throw new Error("RUNTIME_FALLBACK: llmFallback invoked at runtime — should escalate to Tier 3");
+}
+${transpiled.replace(/\bexport\s+(async\s+)?function\b/g, "$1function")}
+const fn = ${args.function_name};
+const fs = await import('node:fs/promises');
+const traces = JSON.parse(await fs.readFile('/tmp/holdout.json', 'utf-8'));
+for (const t of traces) {
+  const t0 = performance.now();
+  try {
+    const out = await fn(t.input);
+    process.stdout.write(JSON.stringify({ ok: true, output: out, latency_ms: performance.now() - t0 }) + "\\n");
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ ok: false, error: String(err && err.message || err).slice(0, 200), latency_ms: performance.now() - t0 }) + "\\n");
+  }
+}
+`;
+
+    const enc = new TextEncoder();
+    await sandbox.writeFile("/tmp/runner.mjs", enc.encode(runner));
+    await sandbox.writeFile("/tmp/holdout.json", enc.encode(JSON.stringify(args.holdout)));
+
+    const result = await sandbox.run("node", {
+      args: ["/tmp/runner.mjs"],
+      timeout: 120,
+    });
+
+    const outputs: unknown[] = [];
+    const latency_ms: number[] = [];
+    let fallback_invoked = false;
+    for (const line of result.stdout.split("\n")) {
+      const s = line.trim();
+      if (!s) continue;
+      let row: { ok: boolean; output?: unknown; error?: string; latency_ms: number };
+      try {
+        row = JSON.parse(s);
+      } catch {
+        // Defensive: skip non-JSON lines (e.g. accidental console.log inside
+        // emitted code). The gate's output-count check will catch missing rows.
+        continue;
+      }
+      if (row.ok) {
+        outputs.push(row.output);
+      } else {
+        if (row.error?.includes("RUNTIME_FALLBACK") || row.error?.includes("GATE_FAIL")) {
+          fallback_invoked = true;
+        }
+        outputs.push({ __error: row.error?.slice(0, 200) ?? "unknown" });
+      }
+      latency_ms.push(row.latency_ms);
+    }
+
+    if (outputs.length !== args.holdout.length) {
+      throw new Error(
+        `RealTensorlakeClient.runEmittedFunction: produced ${outputs.length} outputs for ${args.holdout.length} traces (exit=${result.exitCode}, stderr=${result.stderr.slice(0, 300)})`,
+      );
+    }
+
+    return { outputs, latency_ms, fallback_invoked };
+  }
+
+  async runPhi(args: RunPhiArgs): Promise<RunPhiResult> {
+    // Tensorlake's TS SDK exposes Sandboxes, not a hosted Phi endpoint —
+    // real Phi-3-mini in-sandbox needs a custom image with weights baked
+    // in (next step). Until that lands, surfacing the same error the SDK
+    // would throw lets TensorlakeWithLocalFallback route to the local
+    // Phi mirror used in tests so the demo's Tier-2 path still completes.
+    void args;
+    throw new Error("RealTensorlakeClient.runPhi: Phi sandbox image not yet built — falling back");
   }
 
   async warm(): Promise<void> {
-    // TODO(B2): pre-warm the Phi sandbox + emitted-fn worker pool per D6.
-    // For now, we resolve instantly so `npm run warm` doesn't crash when
-    // the real client is configured but unwired.
-    return;
+    await this.getSandbox();
+  }
+
+  async close(): Promise<void> {
+    if (!this.sandbox) return;
+    try {
+      await this.sandbox.terminate();
+    } finally {
+      this.sandbox = null;
+      this.warming = null;
+    }
   }
 }
 
