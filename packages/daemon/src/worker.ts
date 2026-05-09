@@ -1,15 +1,13 @@
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { startCodeWatch } from "./code-watch.js";
+import { getAcmeCorpusPath } from "./paths.js";
 
 // Use anyApi to avoid pulling convex/* sibling .ts files into our typecheck.
 // We trust the runtime-deployed function names; smoke tests catch typos.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = anyApi as any;
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 import { fireCompile } from "./fire-compile.js";
 
 /**
@@ -60,9 +58,10 @@ export async function startWorker({ worker_id, convex_url }: WorkerArgs): Promis
     }
   }, HEARTBEAT_MS);
 
-  // Code-change trigger source — observes git SHA of data/acme-agent every 30s.
+  // Code-change trigger source — observes git SHA of the corpus every 30s.
+  // getAcmeCorpusPath() resolves the bundled corpus or the dev-mode corpus.
   startCodeWatch({
-    repoRoot: REPO_ROOT,
+    targetDir: getAcmeCorpusPath(),
     intervalMs: 30_000,
     onObserve: async (sha) => {
       try {
