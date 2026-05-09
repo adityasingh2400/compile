@@ -8,6 +8,8 @@ const daemonTarget = process.env.COMPILE_DAEMON_URL ?? "http://localhost:8421";
 
 export default defineConfig({
   plugins: [react()],
+  // Read `.env.local` from the monorepo root so VITE_CONVEX_URL flows in.
+  envDir: "../..",
   server: {
     port: 5173,
     host: "0.0.0.0",
