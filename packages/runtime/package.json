@@ -17,12 +17,14 @@
     "test": "vitest run",
     "derisk:phi": "tsx src/phi/derisk.ts",
     "generate:inputs": "tsx src/inputs/cli.ts",
-    "warm": "node ./dist/warm-cli.js"
+    "warm": "node ./dist/warm-cli.js",
+    "live-smoke": "node --env-file=../../.env.local ./dist/tensorlake-smoke.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
     "@compile/schemas": "*",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.24.0",
+    "tensorlake": "^0.5.9"
   },
   "devDependencies": {
     "tsx": "^4.19.1",
