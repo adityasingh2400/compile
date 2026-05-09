@@ -18,8 +18,10 @@ import {
   type CallSiteDescriptor,
   type SyntheticRun,
   type ScanReport,
+  type NegativeCachedOutput,
   RETRY_POLICY_BY_REASON,
 } from "@compile/schemas";
+import { isFreshEnough } from "./negative-freshness.js";
 import type { INiaClient } from "@compile/nia";
 import {
   gate,
@@ -147,6 +149,14 @@ export interface HandlerDeps {
     input_schema: Record<string, unknown>;
     output_schema: Record<string, unknown>;
     customer_docs?: SynthesisSpec["customer_docs"];
+  };
+  /**
+   * Optional handle for callers (UI / report panels) to read session-scoped
+   * negative-vault telemetry. Populated by buildHandlers — pass an empty
+   * object and it will be filled with a `snapshot()` getter.
+   */
+  negativeVaultMetricsRef?: {
+    snapshot?: () => { hits: number; dollars_saved_total: number };
   };
 }
 
@@ -286,6 +296,20 @@ export function buildHandlers(deps: HandlerDeps): Record<
     string,
     Extract<Parameters<INiaClient["vaultWrite"]>[0], { kind: "positive" }>
   >();
+  /**
+   * Session-scoped telemetry for negative-vault short-circuits. Each hit is
+   * a synthesis spin-up we *didn't* pay for. NEG_CACHE_SAVINGS_USD is a flat
+   * demo-grade estimate of agent + spec LLM cost per attempt; replace with a
+   * real cost-model when the synthesizer reports actuals.
+   */
+  const negativeVaultMetrics = {
+    hits: 0,
+    dollars_saved_total: 0,
+  };
+  const NEG_CACHE_SAVINGS_USD = 0.1;
+  if (deps.negativeVaultMetricsRef) {
+    deps.negativeVaultMetricsRef.snapshot = () => ({ ...negativeVaultMetrics });
+  }
   const runId = (): string => {
     if (deps.runId) return deps.runId();
     let rid = deps.bootstrap.getRunId();
@@ -433,19 +457,81 @@ export function buildHandlers(deps: HandlerDeps): Record<
       const merged = [...stage2, ...proxy].sort(
         (a, b) => b.projected_annual_savings_usd - a.projected_annual_savings_usd,
       );
+      // Gap 2: drop candidates whose cluster_signature has a binding negative
+      // vault entry. Sticky negatives are dropped outright; expiring negatives
+      // are dropped unless the cluster has accumulated enough new traces (or
+      // the underlying code SHA has shifted) to justify another attempt.
+      // Lookups are batched in parallel — Nia may be remote, so we don't want
+      // O(N) sequential round-trips on every candidate-list call.
+      const lookups = await Promise.all(
+        merged.map(async (c) => ({
+          c,
+          lookup: await deps.nia.vaultLookup(c.cluster.cluster_signature),
+        })),
+      );
+      const survivors = lookups.filter(({ c, lookup }) => {
+        if (lookup.state !== "negative") return true;
+        return isFreshEnough(lookup.entry, {
+          trace_count: c.cluster.trace_count,
+        });
+      });
+      const dropped = lookups.length - survivors.length;
+      if (dropped > 0) {
+        negativeVaultMetrics.hits += dropped;
+        negativeVaultMetrics.dollars_saved_total += dropped * NEG_CACHE_SAVINGS_USD;
+      }
       return {
-        candidates: merged.slice(0, limit).map((c) => ({
+        candidates: survivors.slice(0, limit).map(({ c, lookup }) => ({
           ...c.cluster,
           projected_annual_savings_usd: c.projected_annual_savings_usd,
           sample_prompt: c.sample_prompt,
+          ...(lookup.state === "negative"
+            ? { previously_negative: true as const }
+            : {}),
         })),
       };
     },
 
-    "compile.request_synthesis": async (raw): Promise<SynthesisSpec> => {
+    "compile.request_synthesis": async (
+      raw,
+    ): Promise<SynthesisSpec | NegativeCachedOutput> => {
       const { cluster_id } = RequestSynthesisInput.parse(raw);
       const candidate = await resolveCandidate(cluster_id);
       if (!candidate) throw new Error(`unknown cluster: ${cluster_id}`);
+      // Gap 1: short-circuit on a binding negative-vault entry. Sticky reasons
+      // never re-attempt; expiring reasons re-attempt only when isFreshEnough
+      // says the cluster's state has shifted enough to be worth another spin.
+      const sig = candidate.cluster.cluster_signature;
+      const lookup = await deps.nia.vaultLookup(sig);
+      if (lookup.state === "negative") {
+        const fresh = isFreshEnough(lookup.entry, {
+          trace_count: candidate.cluster.trace_count,
+        });
+        if (!fresh) {
+          negativeVaultMetrics.hits += 1;
+          negativeVaultMetrics.dollars_saved_total += NEG_CACHE_SAVINGS_USD;
+          const rid = runId();
+          await stream.emitSynthesisEvent({
+            event: {
+              run_id: rid,
+              request_id: `neg_${randomUUID().slice(0, 8)}`,
+              cluster_id,
+              stage: "failed",
+              failure_reason: `negative_cached: ${lookup.entry.reason}`,
+              emitted_at: new Date().toISOString(),
+            },
+          });
+          return {
+            negative_cached: true,
+            cluster_signature: lookup.entry.cluster_signature,
+            reason: lookup.entry.reason,
+            retry_policy: lookup.entry.retry_policy,
+            trace_count_at_decision: lookup.entry.trace_count_at_decision,
+            created_at: lookup.entry.created_at,
+            synthesis_dollars_saved_estimate: NEG_CACHE_SAVINGS_USD,
+          };
+        }
+      }
       const inputs = buildSpecInputs(candidate) as ReturnType<typeof defaultBuildSpecInputs> & {
         customer_docs?: SynthesisSpec["customer_docs"];
       };

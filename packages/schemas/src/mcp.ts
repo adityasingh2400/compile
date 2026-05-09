@@ -4,6 +4,8 @@ import { ClusterSchema, AxisScoresSchema } from "./cluster.js";
 import {
   SynthesisSpecSchema,
   SynthesisEnvelopeSchema,
+  NegativeReasonSchema,
+  RetryPolicySchema,
 } from "./synthesis.js";
 import { VaultLookupResultSchema } from "./vault.js";
 import { ScanReportSchema } from "./scanner.js";
@@ -50,6 +52,12 @@ export const ListCandidatesOutput = z.object({
     ClusterSchema.extend({
       projected_annual_savings_usd: z.number(),
       sample_prompt: z.string(),
+      /**
+       * True when the cluster previously hit the negative vault but the
+       * retry policy says it's worth another attempt (trace count climbed,
+       * or call-site code changed). UI can flag these as "second attempt."
+       */
+      previously_negative: z.literal(true).optional(),
     }),
   ),
 });
@@ -58,7 +66,26 @@ export const ListCandidatesOutput = z.object({
 export const RequestSynthesisInput = z.object({
   cluster_id: z.string(),
 });
-export const RequestSynthesisOutput = SynthesisSpecSchema;
+/**
+ * Returned when the cluster is already known-uncodifiable (negative vault hit
+ * with a still-binding retry policy). Callers MUST check for `negative_cached`
+ * before treating the response as a synthesis spec.
+ */
+export const NegativeCachedOutputSchema = z.object({
+  negative_cached: z.literal(true),
+  cluster_signature: z.string(),
+  reason: NegativeReasonSchema,
+  retry_policy: RetryPolicySchema,
+  trace_count_at_decision: z.number().int().nonnegative(),
+  created_at: z.string(),
+  /** Estimated $ saved by skipping a synthesis attempt. Demo-grade flat rate. */
+  synthesis_dollars_saved_estimate: z.number().nonnegative(),
+});
+export type NegativeCachedOutput = z.infer<typeof NegativeCachedOutputSchema>;
+export const RequestSynthesisOutput = z.union([
+  SynthesisSpecSchema,
+  NegativeCachedOutputSchema,
+]);
 
 /* 6. compile.submit_synthesis(request_id, envelope) */
 export const SubmitSynthesisInput = z.object({
