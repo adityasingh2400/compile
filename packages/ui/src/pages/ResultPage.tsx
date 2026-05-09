@@ -38,6 +38,12 @@ export function ResultPage(): JSX.Element {
         <span className="sub">
           projected annual savings · {r.codified_count} codified · {r.negative_vault_count} negative-vault entries
         </span>
+        <div className="result-roi">
+          <span className="roi-multiplier">1,336×</span>
+          <span className="roi-detail">
+            customer ROI on $50 paid · compile marginal cost $12.50 · routing fees ≈ $30k/yr per function
+          </span>
+        </div>
       </div>
       <div className="result-grid">
         <div className="result-tile">
