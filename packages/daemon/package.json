@@ -1,17 +1,51 @@
 {
   "name": "@compile/daemon",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Always-on local worker for Compile. Subscribes to a Convex pending_compiles queue, fans out synthesis with Tensorlake + Phi-3-mini, and writes vault entries via Nia.",
+  "license": "MIT",
   "type": "module",
+  "bin": {
+    "compile-daemon": "./dist/index.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "data",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rmotgi1227/Compile.git",
+    "directory": "packages/daemon"
+  },
+  "keywords": [
+    "compile",
+    "always-on",
+    "agent",
+    "convex",
+    "tensorlake",
+    "nia"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsup",
     "dev": "node --env-file=../../.env.local --import tsx src/index.ts",
-    "start": "node --env-file=../../.env.local ./dist/index.js"
+    "start": "node --env-file=../../.env.local ./dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "node ./scripts/copy-corpus.mjs",
+    "prepublishOnly": "npm run build && npm run prepack"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "convex": "^1.38.0",
+    "tensorlake": "^0.5.9",
+    "ts-morph": "^24.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
     "@compile/nia": "*",
     "@compile/runtime": "*",
     "@compile/scanner": "*",
@@ -19,10 +53,9 @@
     "@compile/stream": "*",
     "@compile/synth-loader": "*",
     "@compile/synthesizer": "*",
-    "convex": "^1.38.0"
-  },
-  "devDependencies": {
+    "tsup": "^8.3.0",
     "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   }
 }
