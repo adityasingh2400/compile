@@ -13,10 +13,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "harness": "tsx harness/index.ts"
   },
   "dependencies": {
     "@compile/schemas": "*",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@compile/runtime": "*",
+    "tsx": "^4.19.2"
   }
 }
