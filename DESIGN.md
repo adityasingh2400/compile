@@ -1,6 +1,6 @@
 # Design: RealityCI — Runtime for Physical Procedures
 
-Last refined: 2026-05-04 (v3)
+Last refined: 2026-05-04 (v4 — adds the action layer)
 Repo: github.com/adityasingh2400/warden
 Status: APPROVED
 Mode: Builder
@@ -32,29 +32,58 @@ injuries annually. Falls remain the #1 cause of workplace fatalities (BLS).
 ## The Inversion
 
 Most camera systems detect what happened. RealityCI verifies whether what
-happened **matched the rules.** That is not a sensor — it is a compiler:
+happened **matched the rules — and then makes the response happen.** That
+is not a sensor. It is a compiler with an executor.
 
 - A company's documents (SOPs, manuals, incident logs, training transcripts,
 Slack discussions) become a **policy graph** with cited rules and edges.
 - A camera (or an AI-agent trace) emits **events.** Events are facts about
 reality: "coffee mug is on power strip," "agent called `apply_label`
 before `add_packing_material`."
-- The verifier checks each event against the policy graph and surfaces a
-**citation** for every pass and every violation.
+- The verifier checks each event against the policy graph and emits a
+**violation** with a citation.
+- The **action layer** dispatches the response automatically: voice call
+to the on-shift safety officer, Slack message to `#incidents`, SMS to
+the facility manager, audit log written, escalation timer started. For
+P0 hazards (fire), it dials a (mock) 911 line. The system *does
+something* — it does not just light up a dashboard.
 
-The same primitive verifies humans and AI agents. That is the on-theme
-hook for "Build the Future of AI Agents."
+The same primitive verifies humans and AI agents — and runs the same
+response protocol against both. That is the on-theme hook for "Build the
+Future of AI Agents."
+
+### Why detection without execution is half a product
+
+Industry research is unambiguous on this. From the Crises-Control 2026
+analysis of manufacturing incident response (citing Siemens TCOD 2024,
+ARC Advisory 2023, OSHA/BLS 2024):
+
+- **40% of plant incidents occur during or after shift changes.** The
+ten minutes after a shift ends are statistically the riskiest of the
+working day.
+- A documented case: SCADA alert fired at 6:47 AM. **Nobody moved for
+nine minutes.** Three people assumed someone else had it; the shift
+lead had handed over 11 minutes earlier; the emergency plan named a
+supervisor who transferred in February.
+- **30% of manufacturing downtime** is from manual-process error.
+- **220,000 manufacturing workplace injuries in 2024.**
+- DuPont La Porte 2014: four deaths traced to shift-handover communication
+failure.
+
+The detection wasn't the problem. The response was. RealityCI's action
+layer is the part that closes the gap from *"the system saw it"* to
+*"the system acted on it."*
 
 ---
 
 ## Why This Design Wins
 
-Three claims this build is making:
+Four claims this build is making:
 
-1. **Verification beats detection.** "AI camera" demos are everywhere; an
+1. **Verification over detection.** "AI camera" demos are everywhere; an
   AI runtime that checks reality against the company's own policies, with
    citations, is rare.
-2. **Knowledge graph beats RAG.** Nia is not a retrieval tool here. It is
+2. **Knowledge graph over RAG.** Nia is not a retrieval tool here. It is
   the policy graph. The graph is rendered live, queried with multiple
    modes, refreshed continuously, and self-improves overnight via
    `nia vault dream`. Arlan's public thesis: "filesystem over RAG."
@@ -62,65 +91,104 @@ Three claims this build is making:
 3. **Same runtime, two substrates.** Today: a person violating a safety
   policy. Tomorrow: a Claude agent calling tools out of order. One
    verifier, one policy graph, two event sources.
+4. **Detection AND execution.** The system doesn't stop at "the dashboard
+  lit up." It calls the right person, sends the SMS, writes the audit
+   trail, escalates if no acknowledgment lands within the SLA, and
+   produces the OSHA 29 CFR 1904 / ISO 45001 record as a byproduct of
+   the response. The execution layer is what turns *"interesting demo"*
+   into *"this would actually have prevented the 9-minute delay."*
 
 ---
 
-## What Changed in v3 (vs. v2 design pulled 2026-05-04)
+## What Changed in v4 (action layer) and v3 (hazard pivot)
 
 
-| Area                      | v2 plan                                 | v3 (this doc)                                                 |
-| ------------------------- | --------------------------------------- | ------------------------------------------------------------- |
-| Demo language             | "beats"                                 | "scenes"                                                      |
-| Demo domain               | Shipping SOP, packing tape, blue cap    | **Safety / hazard events** (mug-on-power-strip, blocked exit) |
-| Detection stack           | YOLOv8n finetuned on 5 objects + Gemini | **YOLO-World (zero-shot) + Gemini 3 Flash** — no training     |
-| YOLO labeling             | ~8h Roboflow marathon                   | **0h** — open-vocabulary, prompt with text classes            |
-| Gemini model              | Gemini 2.0 Flash                        | **Gemini 3 Flash** (Agentic Vision, released Jan 2026)        |
-| Nia usage                 | ingest + retrieval + cite               | **12 capability surfaces** (see Nia Integration)              |
-| Visual primitive          | 5-step linear test graph                | **Policy graph** — rules, references, prior-incident edges    |
-| Build cadence             | Day-by-day                              | **Flat task list** with priority + dependency tags            |
-| Tensorlake                | Stretch (cut Day 5)                     | Cut entirely                                                  |
-| Image region (bbox) cites | Cut                                     | Re-introduced via Nia's native `extract/detect` (free win)    |
-| Production-footage scene  | Half-in (architecture only)             | **Removed.** Three scenes, not four                           |
+| Area                      | v2 plan                                 | v3                                                  | v4 (this doc)                                                                         |
+| ------------------------- | --------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Demo language             | pitch segments                          | "scenes"                                            | scenes (unchanged)                                                                    |
+| Demo domain               | Shipping SOP, packing tape, blue cap    | Safety / hazard events                              | Safety / hazard events + execution                                                    |
+| Detection stack           | YOLOv8n finetuned on 5 objects + Gemini | YOLO-World (zero-shot) + Gemini 3 Flash             | unchanged                                                                             |
+| YOLO labeling             | ~8h Roboflow marathon                   | 0h                                                  | unchanged                                                                             |
+| Gemini model              | Gemini 2.0 Flash                        | Gemini 3 Flash (Agentic Vision)                     | unchanged                                                                             |
+| Nia usage                 | ingest + retrieval + cite               | 12 capability surfaces                              | + 2 surfaces for action plans (Document Agent JSON schema, Vault response-plan pages) |
+| Visual primitive          | 5-step linear test graph                | Policy graph (rules, edges, prior incidents)        | + Action timeline pane                                                                |
+| Build cadence             | Day-by-day                              | Flat task list                                      | unchanged                                                                             |
+| Tensorlake                | Stretch (cut Day 5)                     | Cut entirely                                        | Cut                                                                                   |
+| Image region (bbox) cites | Cut                                     | Re-introduced via Nia's `extract/detect` (free win) | unchanged                                                                             |
+| Production-footage scene  | Half-in (architecture only)             | Removed                                             | Removed                                                                               |
+| Sponsor stack             | Nia + Convex + Vercel                   | + InsForge + Aside (mentioned)                      | **InsForge load-bearing for action layer**, Aside stretch                             |
+| **Execution / response**  | None                                    | None                                                | **Voice call + SMS + Slack + email + audit log + escalation**                         |
+| **Demo wow moment**       | Live ingest scene                       | Live ingest + agent trace                           | + **The phone literally rings during the pitch**                                      |
 
 
-**Net effect:** ~14 hours saved (no labeling/training, no production-footage
-hunt, no Tensorlake). Reinvested into a deeper Nia integration, the policy
-graph, and rehearsals.
+**Net effect:** v3 saved ~14 hours by killing YOLO training and the
+production-footage scene. v4 spends some of that budget on the action
+layer (Twilio voice + SMS + Slack + email + audit log + escalation +
+ack tracker) and the InsForge integration that powers it. The 3-scene
+pitch length stays at 180 seconds — execution is *folded into* each
+scene, not added as a fourth scene.
 
 ---
 
 ## The Three Scenes (180-second pitch)
 
-We use the word **scene**, not "beat." Each scene is one continuous,
-rehearsed visual moment.
+Each scene is one continuous, rehearsed visual moment.
 
-### Scene 1 — "Reality, audited" (0–60s)
+### Scene 1 — "Reality, audited and dispatched" (0–65s)
 
-Open shot: the dashboard. Top-left tile streams the live camera feed. The
-center tile is the **policy graph**, a force-directed React Flow rendering
-of rules retrieved from Nia: "OSHA 1910.305 — electrical hazards," "OSHA
-1910.157 — emergency equipment," "OSHA 1910.23 — ladders." Right tile is
-the citation card.
+**Open shot.** The dashboard. Four tiles:
 
-The demoer sets a coffee mug on top of a printed power-strip card on the
-table. Within a second, two things happen:
+- **Top-left:** live camera feed.
+- **Center:** the **policy graph** — a force-directed React Flow rendering
+of rules retrieved from Nia ("OSHA 1910.305 — electrical hazards,"
+"OSHA 1910.157 — emergency equipment access," "OSHA 1910.23 —
+ladders," and ~15 other safety rule nodes with edges to prior
+incidents).
+- **Right:** the citation card (currently empty).
+- **Bottom:** the **action timeline pane** (currently empty).
 
-1. The "OSHA 1910.305(g)(1)(iii) — Liquid near energized equipment" node in
-  the graph turns red and pulses. Edges to the related rule "Spill
-   prevention" and the prior incident "INC-2024-018: server room flooded
-   from coffee spill" light up.
-2. The citation card surfaces verbatim: "Energized parts of electric
-  equipment operating at 50 volts or more shall be guarded against
-   accidental contact... portable equipment shall be supported as
-   needed..." with the source PDF page rendered as a thumbnail.
+**The violation.** Demoer sets a coffee mug on top of a printed power-
+strip card. Within ~1 second:
 
-Demoer narrates: "RealityCI didn't just see a mug. It saw a policy
-violation. The rule is from the company's own safety manual. Nia indexed
-it once. Now reality runs against it in real time."
+1. YOLO-World detects `coffee_mug` and `power_strip`. Gemini 3 Flash
+  confirms "mug above power strip" relation. Verifier matches OSHA
+   1910.305(g)(1)(iii). The policy-graph node turns red and pulses.
+   Edges to "Spill prevention" and prior incident "INC-2024-018" light up.
+   Citation card hydrates with the verbatim quote and source PDF
+   thumbnail.
+2. Severity classifier reads the rule's `severity: P1` tag from the Nia
+  Vault page for that rule.
+3. The action layer reads the Nia-extracted response plan:
+  `safety_officer_voice + sms + slack + email + audit_log`, SLA 2 minutes.
+4. InsForge edge function fans out the response. The demoer's phone rings
+  on stage:
+  > "RealityCI alert. Electrical hazard detected at Demo Station 1. Coffee
+  > mug is positioned over energized equipment. Rule OSHA 1910.305. Press 1
+  > to acknowledge, 2 to escalate."
+5. Demoer presses `1`. The action timeline updates live:
+  ```
+   T+000ms  violation fired
+   T+120ms  audit log written (InsForge Postgres)
+   T+220ms  Slack #incidents sent
+   T+310ms  SMS sent to Safety Officer
+   T+480ms  voice call started
+   T+12.4s  acknowledgement received from Safety Officer
+  ```
 
-### Scene 2 — "Memory, alive" (60–120s)
+Narration: "A dashboard is not enough. The first ten minutes of a plant
+incident are where response breaks down. RealityCI assigns ownership,
+calls the right role, and builds the audit trail automatically."
 
-Demoer drops a JSON file into a watched folder via a hotkey macro:
+**Demo discipline:** we never call real 911. The P0 fire path calls a
+mock `911_DISPATCH_DEMO_NUMBER` controlled by the team. The on-screen label
+says "mock emergency dispatch" so the demo is ethically clean.
+
+### Scene 2 — "Memory, alive and executable" (65–125s)
+
+Demoer says: "The company's procedures don't stay static, and response
+plans shouldn't either."
+
+Demo ops drops a new incident JSON into the watched folder via hotkey:
 
 ```json
 {
@@ -128,114 +196,142 @@ Demoer drops a JSON file into a watched folder via a hotkey macro:
   "type": "near-miss",
   "summary": "Bag blocking fire extinguisher in shipping bay 3",
   "occurred_at": "2026-05-04T14:30:00Z",
-  "rule_violated": "OSHA 1910.157(c)(1)"
+  "rule_violated": "OSHA 1910.157(c)(1)",
+  "recommended_response": {
+    "severity": "P1",
+    "roles": ["safety_officer", "floor_supervisor"],
+    "channels": ["slack", "sms"],
+    "sla_seconds": 120
+  }
 }
 ```
 
 The dashboard spinner flashes "Nia ingesting..." For ~5–8 seconds, judges
 see the policy graph **grow**: a new incident node attaches to the
-"Emergency equipment access" rule. Rule weight visibly thickens (more
-incidents = thicker edges = higher visual priority).
+"Emergency equipment access" rule. The response-plan edge also appears:
+`OSHA-1910.157 -> response.fire_equipment_blocked -> safety_officer`.
 
-Demoer takes a paper bag and places it directly in front of the printed
-"fire extinguisher" sign on the wall. The verifier fires immediately. The
-new incident node is *already* in the graph — the rule cite + the
-just-ingested prior incident both surface in the citation card.
+Demoer places a paper bag in front of the printed "fire extinguisher"
+sign. The verifier fires immediately. The system surfaces:
 
-Narration: "Most procedure systems are static. The company learns from
-every incident. The runtime learns with it. Watch what happens when the
-night-shift `nia vault dream` job runs..."
+- The OSHA citation
+- The just-ingested prior incident
+- The response plan Nia extracted from the incident + SOP
+- A Slack + SMS dispatch in the action timeline
 
-A short pre-recorded clip plays in the corner: the policy graph
-self-improves overnight (Vault discovers a connection between three near-
-misses and reclassifies a low-priority rule into a high-priority one). The
-clip is real Nia output, recorded in dry-run.
+We do **not** fire a second voice call here unless pacing allows; Scene 1
+already proved voice. Scene 2 proves live memory + role-based response.
 
-### Scene 3 — "The same runtime, but for agents" (120–170s)
+Narration: "Most emergency plans name people. People transfer, go on leave,
+or hand off shifts. RealityCI assigns tasks to **roles**, not names, and
+routes to whoever is active on the shift."
 
-The dashboard shifts: top-left becomes an **agent trace pane** showing a
+Short pre-recorded clip in the corner: `nia vault dream` links three
+near-miss incidents to the same emergency-equipment rule and upgrades its
+visual priority in the graph. The runtime learned overnight.
+
+### Scene 3 — "The same runtime, but for agents" (125–170s)
+
+The dashboard shifts. Top-left becomes an **agent trace pane** showing a
 scripted agent calling shipping tools.
 
 ```
 [00:00] agent.pick_up_box()              ✓
 [00:03] agent.add_product()              ✓
 [00:06] agent.apply_shipping_label()     ✗  out-of-order
-                                              expected: add_packing_material
-                                              first
+                                             expected: add_packing_material
+                                             first
 ```
 
-The verifier fires the same red flash, the same citation, the same edge to
-the prior incident. The graph shows it doesn't care whether the actor is a
-person or an LLM. **Same policy. Same engine. Same memory.**
+The verifier fires the same red flash, same citation card, same edge to
+the prior incident. Then the execution layer kicks in again, but the
+recipient is different:
 
-Narration: "Today: factories. Tomorrow: every AI agent that touches a real
-process. We built the runtime."
+> "RealityCI agent alert. Agent `ship-bot-7` violated procedure
+> `PACK-2.3`: label applied before packing material. Press 1 to halt the
+> agent, 2 to allow with audit note."
+
+The demoer presses `1`. The action timeline shows `agent_halt_requested`,
+`owner_acknowledged`, and `audit_log_written`.
+
+Narration: "Today, a person. Tomorrow, every AI agent that touches a real
+process. Same policy graph, same verifier, same execution protocol."
 
 ### Outro (170–180s)
 
-"Siemens estimates physical-work failures cost the world's largest
-companies $1.4T a year. OSHA estimates correct procedure prevents 120
-deaths a year. We turn your company's own documents into the runtime that
-prevents them. Thank you. We're RealityCI."
+"Siemens estimates the world's largest manufacturers lose $1.4T a year to
+unplanned downtime. The worst failures aren't only detection failures.
+They're execution failures. RealityCI turns company knowledge into a
+runtime that detects, verifies, dispatches, escalates, and records. We're
+RealityCI."
 
 **Timing notes:**
 
-- Hard cap on Scene 1 = 60s. We trim citation narration if it runs long.
-- Scene 2's `vault dream` clip is pre-recorded; cuttable to 5s if pacing demands.
-- Scene 3 cannot be cut. It is the on-theme moment. If we run long, the
-outro shrinks to 5 seconds.
+- Scene 1 voice call is the memorable moment. Do not cut it.
+- Scene 2's `vault dream` clip is optional if pacing runs long.
+- Scene 3 cannot be cut; it is the on-theme AI-agent moment.
+- If total pitch length is under 3 minutes, keep Scene 1 + Scene 3 and
+compress Scene 2 to a 15-second live-ingest flash.
 
 ---
 
 ## Architecture
 
 ```
-                EVENT SOURCES
-   ┌────────────────────┬─────────────────────┐
-   │                    │                     │
-   ▼                    ▼                     ▼
-Live camera        Watched folder         Agent trace player
-(YOLO-World +      (incidents/*.json)     (scripted JSON
- Gemini 3 Flash)         │                  events)
-   │                    │                     │
-   │                    ▼                     │
-   │            Nia continuous-monitor        │
-   │            ingest (event source 2        │
-   │            also writes new policy        │
-   │            graph nodes)                  │
-   │                    │                     │
-   └────────────────────┼─────────────────────┘
-                        ▼
-            ┌──────────────────────────┐
-            │ Verifier (state machine)  │
-            │ event → policy graph     │
-            │ lookup → citation        │
-            └────────────┬─────────────┘
-                         │
-        ┌────────────────┴───────────────┐
-        ▼                                ▼
-┌─────────────────┐              ┌──────────────────┐
-│  Nia            │              │  Convex          │
-│  Knowledge      │              │  Real-time state │
-│  Graph          │◄────write────│  + Agent threads │
-│ (Vault + index) │  audit       │  + websocket     │
-│                 │  trail       │  streaming       │
-│ search/query/   │              │                  │
-│ deep, document  │              └─────────┬────────┘
-│ agent, oracle,  │                        │
-│ tracer, vault   │                        ▼
-│ dream, scoped   │              ┌──────────────────┐
-│ MCP, local sync │              │ Next.js (Vercel) │
-└─────────────────┘              │ React Flow graph │
-                                 │ Agent trace pane │
-                                 │ Citation card    │
-                                 │ Camera feed      │
-                                 └──────────────────┘
+                         EVENT SOURCES
+   ┌─────────────────────┬──────────────────────┬─────────────────────┐
+   │                     │                      │                     │
+   ▼                     ▼                      ▼
+Live camera         Watched folder          Agent trace player
+(YOLO-World +       (incidents/*.json)      (scripted JSON
+ Gemini 3 Flash)           │                 events)
+   │                       ▼                      │
+   │              Nia Local Sync                   │
+   │              + Vault ingest                   │
+   │                       │                      │
+   └───────────────────────┼──────────────────────┘
+                           ▼
+              ┌──────────────────────────┐
+              │ Verifier                 │
+              │ event → policy graph     │
+              │ lookup → citation        │
+              │ severity → response plan │
+              └─────────────┬────────────┘
+                            │
+        ┌───────────────────┼──────────────────────┐
+        ▼                   ▼                      ▼
+┌─────────────────┐ ┌──────────────────┐   ┌─────────────────────┐
+│ Nia             │ │ Convex           │   │ InsForge             │
+│ Knowledge Graph │ │ real-time state  │   │ action ledger        │
+│ Vault + docs    │ │ Agent Component  │   │ Postgres + Edge Fn   │
+│ Document Agent  │ │ websocket deltas │   │ dispatcher + audit   │
+└────────┬────────┘ └─────────┬────────┘   └──────────┬──────────┘
+         │                    │                       │
+         │                    ▼                       ▼
+         │          ┌──────────────────┐     ┌─────────────────────┐
+         └─────────▶│ Next.js (Vercel) │◀────│ Twilio/Bland-style  │
+                    │ React Flow graph │     │ channels: voice,    │
+                    │ citation card    │     │ SMS, Slack, email   │
+                    │ action timeline  │     └─────────────────────┘
+                    │ agent trace pane │
+                    └──────────────────┘
 ```
 
 The verifier is **substrate-agnostic.** It does not know whether an event
-came from a camera, a watched folder, or an agent trace. Same state machine,
-same policy graph, same citation pipeline.
+came from a camera, a watched folder, or an agent trace. Same state
+machine, same policy graph, same citation pipeline, same execution layer.
+
+**Separation of duties:**
+
+- **Nia** owns source truth: policies, citations, response-plan extraction,
+Vault graph, context sharing, local sync.
+- **Convex** owns live UI state: graph transitions, agent trace thread,
+websocket deltas, hotkeys, dashboard reactivity.
+- **InsForge** owns irreversible side effects: action ledger, edge-function
+fan-out, channel dispatch, acknowledgements, escalation timers, audit log.
+- **Twilio/Bland-style voice** owns the on-stage phone call. Demo path uses
+Twilio + pre-recorded ElevenLabs TwiML for reliability; production path
+can swap to Bland/Vapi/Retell for fully conversational calls.
 
 ---
 
@@ -296,7 +392,7 @@ type HazardEvent = {
 };
 ```
 
-### Why this beats the v2 plan
+### Why this is better than the v2 plan
 
 - **No labeling, no training, no fine-tuning.** Saves ~14 hours of build.
 - **Robust to venue lighting.** YOLO-World was pretrained on huge corpora.
@@ -529,6 +625,132 @@ keeps running independently.
 
 ---
 
+## Action Layer — From Detection To Response
+
+This is the part that makes RealityCI operational instead of observational.
+When the verifier fires a violation, it creates an `ActionPlan` from the
+Nia policy graph and dispatches it through InsForge.
+
+### Response protocol model
+
+Each policy graph rule has a response plan page in the Nia Vault. Nia's
+Document Agent extracts it into a typed object at compile time:
+
+```typescript
+type ActionPlan = {
+  rule_id: string;
+  severity: 'P0' | 'P1' | 'P2' | 'P3';
+  summary: string;
+  roles: ('safety_officer' | 'floor_supervisor' | 'facility_manager' | 'agent_owner' | 'mock_911_dispatch')[];
+  channels: ('voice' | 'sms' | 'slack' | 'email' | 'in_app')[];
+  sla_seconds: number;
+  escalation: {
+    if_unacknowledged_after_s: number;
+    next_roles: string[];
+  };
+  audit_requirements: ('osha_1904' | 'iso_45001' | 'internal_postmortem')[];
+  source_citation: { source_doc: string; page: number; paragraph?: number };
+};
+```
+
+### Severity tiers
+
+
+| Tier   | Trigger examples                                                 | SLA      | Channels                                                        |
+| ------ | ---------------------------------------------------------------- | -------- | --------------------------------------------------------------- |
+| **P0** | Active fire, smoke + accelerant, person down                     | <30s     | Mock-911 voice, safety officer voice, SMS, Slack, email, in-app |
+| **P1** | Blocked extinguisher, liquid near energized equipment, fall risk | <2min    | Safety officer voice, SMS, Slack, email                         |
+| **P2** | Procedure violation without immediate harm                       | <10min   | Slack, email digest, in-app                                     |
+| **P3** | Advisory / weak signal                                           | log only | Audit log                                                       |
+
+
+Severity is not hard-coded. It comes from the Nia-extracted policy page.
+The demo's mug-on-power-strip event is P1. A staged flame/smoke event would
+be P0, but we do not stage real fire at EF.
+
+### Dispatch pipeline
+
+```
+Violation fired
+      │
+      ▼
+Nia: resolve rule + ActionPlan
+      │
+      ▼
+InsForge Edge Function: dispatch(action_plan, violation)
+      │
+      ├── write immutable action ledger row (Postgres)
+      ├── send Slack message (#incidents)
+      ├── send SMS (safety officer / supervisor)
+      ├── start voice call (Twilio demo path)
+      ├── send email (facility manager)
+      └── start SLA timer (escalate if no ack)
+      │
+      ▼
+Convex: stream action timeline to dashboard
+```
+
+### Why InsForge belongs here
+
+Convex is excellent for live UI state. InsForge is the better place for
+the execution ledger:
+
+- Postgres gives an audit log that looks like a real compliance record.
+- Edge Functions are the right primitive for fan-out dispatch.
+- Realtime pub/sub can notify Convex or the frontend if needed.
+- AI Model Gateway can summarize the incident into human-readable voice,
+SMS, and email payloads.
+- Agent-native metadata makes it easier for coding agents to inspect and
+modify the response schema while building.
+
+### Voice call demo path
+
+**Demo implementation:** Twilio outbound call + pre-recorded ElevenLabs
+voice via TwiML. No live LLM in the phone call. It is deterministic, fast,
+and safe.
+
+**Production path:** Bland / Vapi / Retell. Research summary:
+
+- Bland is purpose-built for outbound high-volume calling and has a
+graph-based flow system ("Pathways"). Good production fit.
+- Retell has the lowest median orchestration-platform latency (~680ms).
+- Vapi is flexible and orchestration-first.
+
+We do not need those risks for the hackathon demo. Twilio + pre-recorded
+TwiML is the right build-time tradeoff.
+
+### Ethical and legal guardrail
+
+RealityCI never calls real 911 in a demo. The P0 path calls a controlled
+mock emergency number owned by the team. The UI labels it **MOCK EMERGENCY
+DISPATCH**. Production deployments require customer-owned emergency-action
+plans, verified contact trees, and explicit site approval before any real
+external emergency call is enabled.
+
+### What gets logged
+
+Every action creates an append-only audit event:
+
+```typescript
+type ActionEvent = {
+  id: string;
+  violation_id: string;
+  action_plan_id: string;
+  channel: 'voice' | 'sms' | 'slack' | 'email' | 'in_app' | 'audit';
+  recipient_role: string;
+  recipient_contact_hash?: string;
+  status: 'queued' | 'sent' | 'delivered' | 'acknowledged' | 'failed' | 'escalated';
+  ts: number;
+  provider_event_id?: string;
+  payload_summary: string;
+};
+```
+
+This is how the OSHA 29 CFR 1904 / ISO 45001 record exists as a byproduct
+of the response, not a separate admin task two hours later.
+
+---
+
 ## Network Resilience
 
 EF venue wifi cannot be a hard demo dependency. Pre-cache everything the
@@ -538,7 +760,12 @@ EF venue wifi cannot be a hard demo dependency. Pre-cache everything the
 - All citations the demo will encounter (static JSON keyed by `rule_id`)
 - 2 incident scenarios for Scene 2 (pre-staged JSON + Nia-cached
 embeddings)
+- 3 response plans (P0 mock emergency, P1 safety-officer call, P2 Slack-only)
+- Pre-rendered Twilio TwiML voice payloads
+- Slack/SMS/email payload templates
 - Local Convex dev instance fallback
+- Local InsForge action-ledger seed data export (JSON backup if hosted
+InsForge is unreachable)
 - YOLO-World weights (already local — Ultralytics ships them)
 - Optional: a small local VLM (Llama 3.2 Vision via Ollama) as Gemini-3-
 Flash fallback for the scene-reasoner
@@ -562,18 +789,23 @@ before the pitch slot.
 | Agent trace player         | 3      | Unit                         |
 | YOLO-World wrapper         | 2      | Integration (golden frames)  |
 | Gemini-3-Flash latency cap | 1      | Integration (hard 800ms cap) |
+| Severity classifier        | 3      | Unit                         |
+| Action dispatcher          | 5      | Unit + mocked providers      |
+| Acknowledgement tracker    | 3      | Unit                         |
 | Critical paths (3 scenes)  | 3      | E2E (Playwright)             |
 | Policy graph render        | 2      | E2E                          |
 | Network-off rehearsal      | 1      | Manual checklist             |
-| **Total**                  | **31** | mixed                        |
+| **Total**                  | **42** | mixed                        |
 
 
 Critical paths:
 
-1. Scene 1 — mug on power strip → red flash + cite + edge animation
+1. Scene 1 — mug on power strip → red flash + cite + edge animation →
+  voice call + acknowledgement
 2. Scene 2 — drop incident JSON → graph node grows → bag in front of fire
-  extinguisher → cite + matching prior incident
-3. Scene 3 — agent trace player → out-of-order tool call → red flash + cite
+  extinguisher → cite + matching prior incident + role-based dispatch
+3. Scene 3 — agent trace player → out-of-order tool call → red flash +
+  cite + agent-owner call + halt acknowledgement
 
 ---
 
@@ -609,7 +841,10 @@ incident log JSONL
 SOP and incidents
 - **P1** Document Agent integration for post-violation expansion
 (Claude Haiku, JSON schema)
+- **P1** Document Agent extraction for response plans (`ActionPlan` schema)
 - **P1** Vault init: build policy wiki from indexed sources
+- **P1** Vault pages for response plans (`response/electrical_hazard.md`,
+`response/fire_equipment_blocked.md`, `response/agent_procedure_violation.md`)
 - **P1** Pre-record `nia vault dream` clip for Scene 2 finale
 - **P1** Local Sync daemon watching the incidents folder
 - **P1** Notion connector for mock internal safety wiki
@@ -619,12 +854,30 @@ SOP and incidents
 ### Convex
 
 - **P0** Schema: `runs`, `policy_graph_state`, `events`, `citations`,
-`incidents`, `violations`
+`incidents`, `violations`, `action_timeline`
 - **P0** Mutations for: start_run, end_run, emit_event, fire_violation,
-ingest_incident
+ingest_incident, record_action_event, acknowledge_action
 - **P0** Query for live policy graph state (drives React Flow)
+- **P0** Query for live action timeline state (drives bottom timeline pane)
 - **P1** Convex Agent Component for the agent-trace thread
 - **P1** Streaming deltas via websocket for the agent trace pane
+
+### InsForge action layer
+
+- **P0** InsForge project setup (Postgres + Edge Functions)
+- **P0** Tables: `action_plans`, `action_events`, `contacts`, `role_roster`,
+`acknowledgements`
+- **P0** Edge function: `dispatchActionPlan(violation_id, action_plan_id)`
+- **P0** Mock providers: Slack, SMS, email, voice call (return deterministic
+provider IDs; no external dependency during offline rehearsal)
+- **P0** Twilio live provider for Scene 1 phone call (controlled number only)
+- **P0** Acknowledgement webhook: keypress/DTMF `1` → `acknowledged`
+- **P0** Escalation timer: if no ack within SLA, create `escalated` action
+event
+- **P1** Provider switch: demo mode (mock + Twilio) vs. production mode
+(Bland/Vapi/Retell pluggable)
+- **P1** Audit export route (JSON timeline for OSHA 1904 / ISO 45001 style
+record)
 
 ### Frontend (Next.js + Vercel)
 
@@ -634,9 +887,12 @@ citation card (right)
 - **P0** Node + edge styles (gray / green / red pulse / amber dot / blue)
 - **P0** Citation card component (rule cite, source thumbnail, prior
 incident card)
+- **P0** Action timeline pane (audit log row stream, channel icons,
+acknowledgement status, escalation timer)
 - **P0** Agent trace pane (left side, swaps from camera feed in
 Scene 3)
-- **P0** Hotkey macro: `START`, `INGEST_INCIDENT`, `SWITCH_TO_AGENT`
+- **P0** Hotkey macro: `START`, `INGEST_INCIDENT`, `SWITCH_TO_AGENT`,
+`ACK_CALL`, `MOCK_ESCALATE`
 - **P1** Edge-draw animation on rule transitions
 - **P1** Pulsing border on violation
 - **P1** "Why this rule?" tooltip wired to Nia `query` mode
@@ -652,6 +908,9 @@ card, printed fire-extinguisher card, ladder/stick, candle, papers
 - **P0** Camera mount + ring light
 - **P0** Hidden hotkey fallback for incident ingest (direct Convex
 mutation)
+- **P0** Team-controlled phone number for Scene 1 voice call
+- **P0** Pre-recorded ElevenLabs voice clips for P1 and agent-owner calls
+- **P0** Mock emergency-dispatch number for P0 path (never real 911)
 - **P0** Backup video recorded
 - **P0** Network-off dress rehearsal
 - **P1** Pre-recorded `nia vault dream` clip
@@ -672,6 +931,9 @@ events into the verifier)
 - **P0** 8 verifier unit tests
 - **P0** 5 citation resolver unit tests
 - **P0** 4 policy graph compiler unit tests
+- **P0** 3 severity-classifier unit tests
+- **P0** 5 action-dispatcher tests with mocked providers
+- **P0** 3 acknowledgement/escalation tests
 - **P0** 3 critical-path E2E tests in Playwright
 - **P1** 2 ingest watcher integration tests
 - **P1** 3 agent-trace player unit tests
@@ -712,16 +974,25 @@ The demo is a success if:
   (no training, no calibration drift).
 3. Violation event → red flash + Nia citation visible to judges within 1
   second.
-4. React Flow graph animates smoothly (no jank, no flicker).
-5. Scene 2 ingest beat: incident JSON → graph grows → cite within 8s,
+4. Scene 1 action layer: the phone rings within 5 seconds of violation,
+  the action timeline shows Slack/SMS/email/audit rows, and
+  acknowledgement updates live after the demoer presses `1`.
+5. React Flow graph animates smoothly (no jank, no flicker).
+6. Scene 2 ingest scene: incident JSON → graph grows → cite within 8s,
   reliably.
-6. Scene 3 agent trace: scripted out-of-order call → same red flash + same
-  citation surface.
-7. Convex propagates all state without page reload throughout.
-8. `NIA_IMPROVEMENTS.md` delivered as a submission deliverable with 3-5
+7. Scene 2 response layer: new incident adds a response-plan edge and
+  dispatches role-based Slack/SMS without a second voice call unless pacing
+  allows.
+8. Scene 3 agent trace: scripted out-of-order call → same red flash + same
+  citation surface + agent-owner call/halt acknowledgement.
+9. Convex propagates all UI state without page reload throughout.
+10. InsForge action ledger contains every dispatch, acknowledgement, and
+  escalation event with timestamps.
+11. `NIA_IMPROVEMENTS.md` delivered as a submission deliverable with 3-5
   concrete proposals.
-9. Full demo runs offline (network-off rehearsal passes).
-10. Judges leave saying "wait, that was Nia under the hood?" — meaning the
+12. Full demo runs offline except for the deliberately tested live phone
+  call path (which has a local mock fallback).
+13. Judges leave saying "wait, that was Nia under the hood?" — meaning the
   Nia integration was visible and load-bearing, not invisible plumbing.
 
 ### Non-goals
@@ -731,7 +1002,9 @@ building a generic safety detector)
 - Multi-camera support
 - Authentication / multi-tenant
 - Real LLM agent in Scene 3 (scripted trace ships; live agent is v2)
-- Hyperspell, Aside, World Labs, Reacher
+- Real 911 / external emergency dispatch during demo
+- Hyperspell, World Labs, Reacher
+- Aside is stretch only (browser-based OSHA form fill after core demo works)
 - Tensorlake (cut)
 
 ---
@@ -744,9 +1017,13 @@ Local Sync, Connectors (Notion, Slack), Scoped MCP, `nia vault dream`.
 ~12 capability surfaces in load-bearing roles.
 - **Convex:** real-time policy graph state, Agent Component for the agent-
 trace thread, websocket streaming deltas.
+- **InsForge:** Postgres action ledger, Edge Function dispatcher, provider
+fan-out, acknowledgements, escalation timers, audit export.
 - **Vercel:** Next.js deploy, edge.
+- **Aside:** stretch — browser automation to fill a mock OSHA 300 /
+ServiceNow/VelocityEHS incident form after the core demo works.
 - **Tensorlake:** cut.
-- **Hyperspell, Aside, World Labs, Reacher:** cut.
+- **Hyperspell, World Labs, Reacher:** cut.
 
 ---
 
