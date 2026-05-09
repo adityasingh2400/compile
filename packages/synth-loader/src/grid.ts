@@ -1,12 +1,15 @@
 import {
   STAGE2_THRESHOLDS,
   type CallSiteDescriptor,
+  type ClusterSnapshotDoc,
+  type LiveMetrics,
   type SyntheticCell,
   type SyntheticInput,
   type SyntheticRun,
   type Trace,
 } from "@compile/schemas";
 import type { INiaClient } from "@compile/nia";
+import type { IBootstrapStream } from "@compile/stream";
 import { expandSeeds } from "./variation.js";
 import { StubOracleClient, type IOracleClient } from "./oracle.js";
 import { StubCandidateClient, type ICandidateClient } from "./candidate.js";
@@ -41,12 +44,35 @@ export interface RunStage2Args {
   /** Fired for each synthetic cell as it transitions; lets the UI / Convex
    * subscription render the grid live. */
   onCell?: (cell: SyntheticCell) => void;
+  /** Optional Convex / in-memory stream. When supplied, runStage2 emits:
+   *   - one `cell` write per completed call (DESIGN.md hero visual)
+   *   - periodic `live_metrics` updates as cells land
+   *   - periodic `cluster_snapshot` updates so Page 6 → 7 reveal works
+   *   - one final `run_complete`
+   * When omitted, the run is silent — backwards-compatible with existing tests.
+   */
+  stream?: IBootstrapStream;
+  /** run_id pairs cells/metrics with the bootstrap_phase doc Lane C subscribes
+   * to. Required if `stream` is set. */
+  run_id?: string;
+  /** ms between live_metrics + cluster_snapshot emits. Default 100ms. */
+  metrics_interval_ms?: number;
 }
 
 export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
   const oracle = args.oracle ?? new StubOracleClient();
   const candidate = args.candidate ?? new StubCandidateClient();
   const seedCount = args.seed_count ?? 100;
+  if (args.stream && !args.run_id) {
+    throw new Error("runStage2: run_id required when stream is provided");
+  }
+  const stream = args.stream;
+  const runId = args.run_id;
+  const metricsIntervalMs = args.metrics_interval_ms ?? 100;
+  let snapshotSeq = 0;
+  let lastEmitAt = 0;
+  let oracleDone = 0;
+  let candidateDone = 0;
 
   const seeds = await args.nia.generateSyntheticSeeds({
     call_site: args.call_site,
@@ -92,7 +118,7 @@ export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
       const r = await oracle.call({ call_site: args.call_site, input });
       oracleByInput.set(input.input_id, r.output);
       const sig = shapeSignature(r.output);
-      args.onCell?.({
+      const cell: SyntheticCell = {
         input_id: input.input_id,
         worker_id: workerId,
         status: "done",
@@ -101,13 +127,22 @@ export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
         cluster_id: sig,
         latency_ms: r.latency_ms,
         cost_usd: r.cost_usd,
-      });
+      };
+      args.onCell?.(cell);
+      oracleDone++;
+      if (stream && runId) {
+        await stream.emitCell({
+          run_id: runId,
+          call_site_id: args.call_site.call_site_id,
+          cell,
+        });
+      }
     } else {
       const r = await candidate.call({ call_site: args.call_site, input });
       candidateByInput.set(input.input_id, r.output);
       tier_mix[r.tier_assigned]++;
       const cluster_id = clusterer.add(input.input_id, r.output);
-      args.onCell?.({
+      const cell: SyntheticCell = {
         input_id: input.input_id,
         worker_id: workerId,
         status: "done",
@@ -117,7 +152,61 @@ export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
         cluster_id,
         latency_ms: r.latency_ms,
         cost_usd: r.cost_usd,
-      });
+      };
+      args.onCell?.(cell);
+      candidateDone++;
+      if (stream && runId) {
+        await stream.emitCell({
+          run_id: runId,
+          call_site_id: args.call_site.call_site_id,
+          cell,
+        });
+      }
+    }
+
+    // Periodic live_metrics + cluster_snapshot emits. Throttled so we don't
+    // hammer Convex with sub-millisecond writes — Page 6 chrome animates
+    // smoothly at ~10Hz.
+    if (stream && runId) {
+      const now = performance.now();
+      if (now - lastEmitAt >= metricsIntervalMs) {
+        lastEmitAt = now;
+        const elapsedSec = Math.max(0.001, (now - t0) / 1000);
+        const totalDone = oracleDone + candidateDone;
+        const liveMetrics: LiveMetrics = {
+          run_id: runId,
+          call_site_id: args.call_site.call_site_id,
+          total_done: totalDone,
+          oracle_done: oracleDone,
+          candidate_done: candidateDone,
+          throughput_per_sec: totalDone / elapsedSec,
+          tier_mix: { ...tier_mix },
+          axis_scores: {
+            schema_stability: round3(
+              stabilityScore(Array.from(candidateByInput.values())),
+            ),
+            determinism: 0,
+            oracle_agreement: round3(
+              oracleAgreementScore(oracleByInput, candidateByInput),
+            ),
+            economic_value: economicValueFromCallSite(
+              args.call_site,
+              args.total_calls,
+            ),
+          },
+          updated_at: new Date().toISOString(),
+        };
+        await stream.emitLiveMetrics({ metrics: liveMetrics });
+
+        const snapshot: ClusterSnapshotDoc = {
+          run_id: runId,
+          call_site_id: args.call_site.call_site_id,
+          snapshot_seq: snapshotSeq++,
+          clusters: clusterer.snapshot(),
+          updated_at: new Date().toISOString(),
+        };
+        await stream.emitClusterSnapshot({ snapshot });
+      }
     }
   });
 
@@ -146,7 +235,7 @@ export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
     }
   }
 
-  return {
+  const finalRun: SyntheticRun = {
     run_id: `run_${randomUUID().slice(0, 8)}`,
     call_site_id: args.call_site.call_site_id,
     total_calls: args.total_calls,
@@ -166,6 +255,36 @@ export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
     preserved_traces: preserved,
     passes_synthesis_gate,
   };
+
+  if (stream && runId) {
+    // Final live_metrics + cluster_snapshot reflecting the post-run truth.
+    // Page 6 chrome converges on these values; Page 7 freezes on the
+    // run_complete write below.
+    const finalMetrics: LiveMetrics = {
+      run_id: runId,
+      call_site_id: args.call_site.call_site_id,
+      total_done: oracleByInput.size + candidateByInput.size,
+      oracle_done: oracleByInput.size,
+      candidate_done: candidateByInput.size,
+      throughput_per_sec: finalRun.throughput_per_sec,
+      tier_mix: { ...tier_mix },
+      axis_scores: finalRun.axis_scores,
+      updated_at: new Date().toISOString(),
+    };
+    await stream.emitLiveMetrics({ metrics: finalMetrics });
+    await stream.emitClusterSnapshot({
+      snapshot: {
+        run_id: runId,
+        call_site_id: args.call_site.call_site_id,
+        snapshot_seq: snapshotSeq++,
+        clusters: finalRun.clusters,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    await stream.emitRunComplete({ run_id: runId, run: finalRun });
+  }
+
+  return finalRun;
 }
 
 async function processInWorkers<T>(

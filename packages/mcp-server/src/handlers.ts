@@ -30,6 +30,10 @@ import {
 } from "@compile/identifier";
 import { scanRepo } from "@compile/scanner";
 import { runStage2 } from "@compile/synth-loader";
+import {
+  NoopBootstrapStream,
+  type IBootstrapStream,
+} from "@compile/stream";
 import type { z } from "zod";
 import type { IRequestStore } from "./store.js";
 
@@ -47,11 +51,15 @@ export interface IBootstrapStore {
   putRun(run: SyntheticRun): void;
   getRun(call_site_id: string): SyntheticRun | undefined;
   allRuns(): SyntheticRun[];
+  /** Active run_id binding bootstrap_phase + cells + metrics for this demo run. */
+  setRunId(run_id: string): void;
+  getRunId(): string | undefined;
 }
 
 export class MemoryBootstrapStore implements IBootstrapStore {
   private scan?: ScanReport;
   private readonly runs = new Map<string, SyntheticRun>();
+  private runId?: string;
   putScan(r: ScanReport): void {
     this.scan = r;
   }
@@ -70,6 +78,12 @@ export class MemoryBootstrapStore implements IBootstrapStore {
   allRuns(): SyntheticRun[] {
     return [...this.runs.values()];
   }
+  setRunId(run_id: string): void {
+    this.runId = run_id;
+  }
+  getRunId(): string | undefined {
+    return this.runId;
+  }
 }
 
 export interface HandlerDeps {
@@ -77,6 +91,21 @@ export interface HandlerDeps {
   store: IRequestStore;
   receipts: IReceiptStore;
   bootstrap: IBootstrapStore;
+  /**
+   * Optional UI/Convex stream. When supplied, every handler emits the
+   * appropriate `bootstrap_phase` advance + lifecycle event (scan / cell /
+   * cluster / synthesis / vault / result) so the eleven-page demo flow
+   * (ENG_REVIEW.md D7) can render in real time. Defaults to a no-op so
+   * library users (Friday harness, unit tests) don't have to wire one.
+   */
+  stream?: IBootstrapStream;
+  /**
+   * Resolves the active run_id. The bootstrap store is the natural home —
+   * scan_repo sets it; subsequent handlers reuse it. Defaults to a
+   * call-keyed UUID when no resolver is supplied (one run per handler call,
+   * which is fine for unit tests).
+   */
+  runId?: () => string;
   /**
    * Resolves a cluster_id to the candidate (cluster + receipts) the
    * pipeline produced. Defaults to running the pipeline live; tests/fixtures
@@ -196,23 +225,44 @@ export function buildHandlers(deps: HandlerDeps): Record<
 > {
   const resolveCandidate = deps.resolveCandidate ?? defaultResolveCandidate(deps);
   const buildSpecInputs = deps.buildSpecInputs ?? defaultBuildSpecInputs;
+  const stream: IBootstrapStream = deps.stream ?? new NoopBootstrapStream();
+  const runId = (): string => {
+    if (deps.runId) return deps.runId();
+    let rid = deps.bootstrap.getRunId();
+    if (!rid) {
+      rid = `run_${randomUUID().slice(0, 8)}`;
+      deps.bootstrap.setRunId(rid);
+    }
+    return rid;
+  };
 
   return {
     "compile.scan_repo": async (raw): Promise<ScanReport> => {
       const { repo_path } = ScanRepoInput.parse(raw);
+      const rid = runId();
+      // Page 1 → Page 2: MCP handshake → AST scan begins.
+      await stream.advancePhase({ run_id: rid, phase: "connect" });
+      await stream.advancePhase({ run_id: rid, phase: "reading_code" });
       const report = await scanRepo(repo_path);
       deps.bootstrap.putScan(report);
+      await stream.emitScan({ run_id: rid, report });
+      // Page 2 → Page 3: Stage-1 priors computed; codifiability decided (D13).
+      await stream.advancePhase({ run_id: rid, phase: "classify" });
       // Eagerly write Stage-1 RED sites to negative Vault per D8 / D11 so
       // routing skips synthesis on them next time.
       for (const cs of report.call_sites) {
         if (cs.priors.pill === "red") {
-          await deps.nia.vaultWrite({
-            kind: "negative",
+          const entry = {
+            kind: "negative" as const,
             cluster_signature: cs.call_site_id,
-            reason: "low_static_prior",
+            reason: "low_static_prior" as const,
             retry_policy: RETRY_POLICY_BY_REASON.low_static_prior,
             trace_count_at_decision: 0,
             created_at: new Date().toISOString(),
+          };
+          await deps.nia.vaultWrite(entry);
+          await stream.emitVaultEvent({
+            event: { run_id: rid, entry, emitted_at: entry.created_at },
           });
         }
       }
@@ -228,14 +278,42 @@ export function buildHandlers(deps: HandlerDeps): Record<
           `synthetic_confirm: call_site ${call_site_id} not found; run scan_repo first`,
         );
       }
+      const rid = runId();
+      // Page 3 → Pages 4, 5, 6 in sequence. Nia seed gen happens inside
+      // runStage2 (via INiaClient.generateSyntheticSeeds) — we mark the
+      // page transitions around it so the UI can animate the doc-fan and
+      // expansion before the constellation kicks in.
+      await stream.advancePhase({
+        run_id: rid,
+        phase: "reading_docs",
+        current_call_site_id: call_site_id,
+      });
+      await stream.advancePhase({
+        run_id: rid,
+        phase: "expanding",
+        current_call_site_id: call_site_id,
+      });
+      await stream.advancePhase({
+        run_id: rid,
+        phase: "stress_test",
+        current_call_site_id: call_site_id,
+      });
       const run = await runStage2({
         call_site: cs,
         total_calls,
         oracle_fraction,
         worker_count,
         nia: deps.nia,
+        stream,
+        run_id: rid,
       });
       deps.bootstrap.putRun(run);
+      // Page 6 → Page 7: constellation freezes, cluster centroids labeled.
+      await stream.advancePhase({
+        run_id: rid,
+        phase: "clusters_revealed",
+        current_call_site_id: call_site_id,
+      });
       return run;
     },
 
@@ -321,11 +399,29 @@ export function buildHandlers(deps: HandlerDeps): Record<
         holdout_traces,
         created_at: Date.now(),
       });
+      const rid = runId();
+      // Page 7 → Page 8: agent now holds the synthesis spec. Page 8 typewriter
+      // starts the moment the agent's codegen begins.
+      await stream.advancePhase({
+        run_id: rid,
+        phase: "agent_writing",
+        current_request_id: request_id,
+      });
+      await stream.emitSynthesisEvent({
+        event: {
+          run_id: rid,
+          request_id,
+          cluster_id,
+          stage: "spec_returned",
+          emitted_at: new Date().toISOString(),
+        },
+      });
       return spec;
     },
 
     "compile.submit_synthesis": async (raw): Promise<SubmitOutput> => {
       const { request_id, envelope } = SubmitSynthesisInput.parse(raw);
+      const rid = runId();
       const pending = deps.store.get(request_id);
       if (!pending) {
         return {
@@ -335,12 +431,36 @@ export function buildHandlers(deps: HandlerDeps): Record<
       }
       const validated = validateEnvelope(envelope);
       if (!validated.ok) {
+        await stream.emitSynthesisEvent({
+          event: {
+            run_id: rid,
+            request_id,
+            cluster_id: pending.cluster_id,
+            stage: "failed",
+            failure_reason: validated.failure_reason,
+            emitted_at: new Date().toISOString(),
+          },
+        });
         return { gate_verdict: "fail", failure_reason: validated.failure_reason };
       }
+      // Agent has emitted code → Page 8 typewriter is done, Page 9 begins.
+      await stream.emitSynthesisEvent({
+        event: {
+          run_id: rid,
+          request_id,
+          cluster_id: pending.cluster_id,
+          stage: "code_emitted",
+          function_name:
+            validated.envelope.synthesizable === true
+              ? validated.envelope.function_name
+              : undefined,
+          emitted_at: new Date().toISOString(),
+        },
+      });
       if (validated.envelope.synthesizable === false) {
         // Negative outcome → write negative entry to Vault per D8 retry policy.
-        await deps.nia.vaultWrite({
-          kind: "negative",
+        const entry = {
+          kind: "negative" as const,
           cluster_signature: pending.cluster_signature,
           reason: validated.envelope.reason,
           retry_policy:
@@ -348,6 +468,21 @@ export function buildHandlers(deps: HandlerDeps): Record<
             RETRY_POLICY_BY_REASON[validated.envelope.reason],
           trace_count_at_decision: pending.spec.traces.length + pending.holdout_traces.length,
           created_at: new Date().toISOString(),
+        };
+        await deps.nia.vaultWrite(entry);
+        await stream.emitSynthesisEvent({
+          event: {
+            run_id: rid,
+            request_id,
+            cluster_id: pending.cluster_id,
+            stage: "failed",
+            failure_reason: `synthesizable=false: ${validated.envelope.reason}`,
+            emitted_at: entry.created_at,
+          },
+        });
+        await stream.advancePhase({ run_id: rid, phase: "vault_write" });
+        await stream.emitVaultEvent({
+          event: { run_id: rid, entry, emitted_at: entry.created_at },
         });
         deps.store.delete(request_id);
         return {
@@ -355,6 +490,18 @@ export function buildHandlers(deps: HandlerDeps): Record<
           failure_reason: `synthesizable=false: ${validated.envelope.reason}`,
         };
       }
+      // Page 8 → Page 9: holdout validation begins.
+      await stream.advancePhase({ run_id: rid, phase: "validate" });
+      await stream.emitSynthesisEvent({
+        event: {
+          run_id: rid,
+          request_id,
+          cluster_id: pending.cluster_id,
+          stage: "validating",
+          function_name: validated.envelope.function_name,
+          emitted_at: new Date().toISOString(),
+        },
+      });
       const verdict = await gate({
         envelope: validated.envelope,
         holdout: pending.holdout_traces,
@@ -362,8 +509,8 @@ export function buildHandlers(deps: HandlerDeps): Record<
       deps.store.delete(request_id);
       if (verdict.verdict === "pass") {
         const function_id = `fn_${validated.envelope.function_name}_${request_id.slice(0, 8)}`;
-        await deps.nia.vaultWrite({
-          kind: "positive",
+        const entry = {
+          kind: "positive" as const,
           function_id,
           cluster_signature: pending.cluster_signature,
           tier: validated.envelope.tier,
@@ -372,6 +519,23 @@ export function buildHandlers(deps: HandlerDeps): Record<
           created_at: new Date().toISOString(),
           hit_count: 0,
           estimated_savings_usd_total: 0,
+        };
+        await deps.nia.vaultWrite(entry);
+        await stream.emitSynthesisEvent({
+          event: {
+            run_id: rid,
+            request_id,
+            cluster_id: pending.cluster_id,
+            stage: "passed",
+            function_name: validated.envelope.function_name,
+            holdout_match_rate: verdict.match_rate,
+            emitted_at: entry.created_at,
+          },
+        });
+        // Page 9 → Page 10: gate passed, Vault write next.
+        await stream.advancePhase({ run_id: rid, phase: "vault_write" });
+        await stream.emitVaultEvent({
+          event: { run_id: rid, entry, emitted_at: entry.created_at },
         });
         return {
           gate_verdict: "pass",
@@ -382,6 +546,18 @@ export function buildHandlers(deps: HandlerDeps): Record<
             (pending.spec.axis_scores.economic_value.monthly_calls * 12),
         };
       }
+      await stream.emitSynthesisEvent({
+        event: {
+          run_id: rid,
+          request_id,
+          cluster_id: pending.cluster_id,
+          stage: "failed",
+          function_name: validated.envelope.function_name,
+          holdout_match_rate: verdict.match_rate,
+          failure_reason: verdict.failure_reason,
+          emitted_at: new Date().toISOString(),
+        },
+      });
       return {
         gate_verdict: "fail",
         holdout_match_rate: verdict.match_rate,

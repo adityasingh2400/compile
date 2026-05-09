@@ -5,3 +5,4 @@ export * from "./vault.js";
 export * from "./scanner.js";
 export * from "./synthload.js";
 export * from "./mcp.js";
+export * from "./stream.js";
