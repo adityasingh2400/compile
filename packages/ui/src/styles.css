@@ -165,6 +165,31 @@ button {
   color: var(--green);
 }
 
+.connect-terminal .handshake-line {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  word-break: break-word;
+  animation: handshake-fade-in 280ms ease;
+}
+
+.connect-terminal .handshake-line.trace {
+  color: var(--cyan);
+  opacity: 0.85;
+}
+
+.connect-terminal .handshake-line.resolved {
+  color: var(--green);
+  font-weight: 500;
+  margin-top: 14px;
+}
+
+@keyframes handshake-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes blink {
   to {
     opacity: 0;
@@ -719,6 +744,29 @@ button {
   color: var(--cyan);
 }
 
+.agent-writes header .agent-id {
+  margin-left: 16px;
+  font-size: 10.5px;
+  color: var(--green);
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border: 1px solid rgba(90, 252, 167, 0.35);
+  border-radius: 3px;
+  background: rgba(90, 252, 167, 0.06);
+}
+
+.agent-writes header .agent-id-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-right: 6px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
 .agent-writes pre {
   padding: 22px 28px;
   font-family: var(--mono);
@@ -958,6 +1006,39 @@ button {
   border: 1px solid rgba(255, 107, 139, 0.4);
   border-radius: 3px;
   padding: 1px 6px;
+}
+
+.result-receipts {
+  margin-top: 4px;
+  border-top: 1px solid var(--dim);
+  padding-top: 14px;
+}
+
+.result-receipts-hd {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--cyan);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.result-receipts-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 22px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.result-receipts-row b {
+  color: var(--fg);
+  font-weight: 500;
+  margin-right: 6px;
+  letter-spacing: 0.06em;
 }
 
 .result-watcher {

@@ -17,6 +17,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import { scanRepo } from "@compile/scanner";
 import { runStage2 } from "@compile/synth-loader";
 import { StubNiaClient } from "@compile/nia";
+import {
+  generateInputs,
+  ICP_FIT_FIXTURE,
+  AMBIGUOUS_LEAD_FIXTURE,
+} from "@compile/runtime";
 import type {
   CallSiteDescriptor,
   LiveMetrics,
@@ -33,8 +38,13 @@ interface BootstrapSnapshot {
     call_sites: CallSiteDescriptor[];
   };
   green_call_sites: string[];
+  /** Real generated inputs from @compile/runtime (Rishab's hybrid generator).
+   * Surfaced on Page 4 (READING DOCS) seed-token strip in live mode. */
+  generated_inputs: {
+    cluster_id: string;
+    samples: { input: unknown; source: "fuzz" | "perturb" }[];
+  }[];
   stress_test: {
-    /** The hero call site we ran the full grid on. */
     call_site_id: string;
     cells_sampled: SyntheticCell[];
     final_metrics: LiveMetrics;
@@ -110,6 +120,26 @@ async function main() {
     throw new Error("no live metrics emitted — synth-loader stream may be broken");
   }
 
+  console.log(`[snapshot] generating real synthetic inputs from runtime fixtures`);
+  const icpInputs = generateInputs({
+    inputSchema: ICP_FIT_FIXTURE.input_schema,
+    traces: ICP_FIT_FIXTURE.traces,
+    n: 16,
+    seed: 7,
+    perturbFraction: 0.5,
+  });
+  const ambInputs = generateInputs({
+    inputSchema: AMBIGUOUS_LEAD_FIXTURE.input_schema,
+    traces: AMBIGUOUS_LEAD_FIXTURE.traces,
+    n: 8,
+    seed: 11,
+    perturbFraction: 0.5,
+  });
+  console.log(
+    `[snapshot] generated ${icpInputs.length + ambInputs.length} inputs ` +
+      `(icp_fit: ${icpInputs.length}, ambiguous_lead: ${ambInputs.length})`,
+  );
+
   const snapshot: BootstrapSnapshot = {
     generated_at: new Date().toISOString(),
     scanner: {
@@ -119,6 +149,16 @@ async function main() {
       call_sites: scan.call_sites,
     },
     green_call_sites: greens.map((g) => g.call_site_id),
+    generated_inputs: [
+      {
+        cluster_id: ICP_FIT_FIXTURE.cluster_id,
+        samples: icpInputs.map((g) => ({ input: g.input, source: g.source })),
+      },
+      {
+        cluster_id: AMBIGUOUS_LEAD_FIXTURE.cluster_id,
+        samples: ambInputs.map((g) => ({ input: g.input, source: g.source })),
+      },
+    ],
     stress_test: {
       call_site_id: hero.call_site_id,
       cells_sampled: cellsSampled,

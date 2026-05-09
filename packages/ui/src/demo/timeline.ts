@@ -58,9 +58,9 @@ async function runTimelineInner(
   advance: (phase: BootstrapPhase) => void,
 ): Promise<void> {
 
-  // Page 1 — CONNECT (≈ 3.5s)
+  // Page 1 — CONNECT (≈ 5s — types command, then 4 MCP-handshake lines)
   advance("connect");
-  await sleep(3500);
+  await sleep(5000);
 
   // Page 2 — READING YOUR CODE (≈ 4.5s)
   advance("reading_code");
@@ -113,13 +113,15 @@ async function runTimelineInner(
   advance("reading_docs");
   getState().setDocTokens([]);
   getState().setSeedCount(0);
-  for (let i = 0; i < DEMO_DOC_TOKENS.length; i++) {
-    const text = DEMO_DOC_TOKENS[i]!;
+  const seedSource =
+    getState().fixtures?.generatedSeedTokens ?? DEMO_DOC_TOKENS;
+  for (let i = 0; i < seedSource.length; i++) {
+    const text = seedSource[i]!;
     // floating tokens land near the seed pool counter at the top
     const x = 8 + (i % 6) * 14 + (Math.random() - 0.5) * 4;
     const y = 30 + Math.floor(i / 6) * 8 + (Math.random() - 0.5) * 4;
     getState().pushDocToken({ id: `t${i}`, text, x, y });
-    getState().setSeedCount(Math.min(100, (i + 1) * Math.ceil(100 / DEMO_DOC_TOKENS.length)));
+    getState().setSeedCount(Math.min(100, (i + 1) * Math.ceil(100 / seedSource.length)));
     await sleep(160);
   }
   getState().setSeedCount(100);
@@ -175,20 +177,32 @@ async function runConstellationStream(getState: GetState): Promise<void> {
   // narrative counter rises faster than visible — caps at 100K
   const narrativeStep = Math.ceil(NARRATIVE_CELLS / expectedBatches);
 
+  // In live mode, source cells from the recorded snapshot but re-bin
+  // across HERO_CLUSTERS so the constellation has visual variety.
+  const recorded = getState().fixtures?.recordedCells;
   while (performance.now() - t0 < totalDurationMs && emitted < VISIBLE_CELLS) {
     const batchSize = Math.min(cellsPerBatchAdjusted, VISIBLE_CELLS - emitted);
     for (let i = 0; i < batchSize; i++) {
       const cluster = pickCluster();
-      const cell: SyntheticCell = {
-        input_id: `i_${emitted + i}`,
-        worker_id: (emitted + i) % 64,
-        status: "done",
-        path: Math.random() < 0.01 ? "oracle" : "candidate",
-        tier_assigned: cluster.tier,
-        cluster_id: cluster.cluster_id,
-        latency_ms: 30 + Math.random() * 20,
-        cost_usd: 0.0001,
-      };
+      const seed = recorded?.[(emitted + i) % recorded.length];
+      const cell: SyntheticCell = seed
+        ? {
+            ...seed,
+            input_id: `live_${emitted + i}`,
+            worker_id: (emitted + i) % 64,
+            cluster_id: cluster.cluster_id,
+            tier_assigned: cluster.tier,
+          }
+        : {
+            input_id: `i_${emitted + i}`,
+            worker_id: (emitted + i) % 64,
+            status: "done",
+            path: Math.random() < 0.01 ? "oracle" : "candidate",
+            tier_assigned: cluster.tier,
+            cluster_id: cluster.cluster_id,
+            latency_ms: 30 + Math.random() * 20,
+            cost_usd: 0.0001,
+          };
       getState().pushCell(cell);
     }
     emitted += batchSize;

@@ -25,6 +25,10 @@ interface BootstrapSnapshot {
     call_sites: CallSiteDescriptor[];
   };
   green_call_sites: string[];
+  generated_inputs?: {
+    cluster_id: string;
+    samples: { input: unknown; source: "fuzz" | "perturb" }[];
+  }[];
   stress_test: {
     call_site_id: string;
     cells_sampled: SyntheticCell[];
@@ -42,6 +46,9 @@ export interface ResolvedFixtures {
   /** When source=real, an array of pre-recorded cells we push into the
    *  constellation instead of generating randomly. */
   recordedCells?: SyntheticCell[];
+  /** Real generated synthetic inputs from runtime fixtures. Surfaced on
+   *  Page 4 (READING DOCS) seed tokens in live mode. */
+  generatedSeedTokens?: string[];
 }
 
 const BAKED: ResolvedFixtures = {
@@ -75,6 +82,7 @@ export async function resolveFixtures(): Promise<ResolvedFixtures> {
       heroCallSiteId: snap.stress_test.call_site_id,
       heroClusters: HERO_CLUSTERS, // keep visual centroids
       recordedCells: snap.stress_test.cells_sampled,
+      generatedSeedTokens: deriveSeedTokens(snap.generated_inputs),
     };
   } catch (err) {
     console.warn("[snapshot] load failed — falling back to baked fixtures", err);
@@ -120,4 +128,43 @@ function shortPath(p: string): string {
   // Trim the absolute repo prefix down to the meaningful suffix.
   const i = p.indexOf("acme-agent/");
   return i >= 0 ? p.slice(i + "acme-agent/".length) : p;
+}
+
+/**
+ * Flatten generated inputs into short labels for the seed-token strip.
+ * Picks one or two salient fields per input so each token is readable in a
+ * floating chip ("industry: industrial automation", "size: 120 employees").
+ */
+function deriveSeedTokens(
+  generated: BootstrapSnapshot["generated_inputs"],
+): string[] | undefined {
+  if (!generated || generated.length === 0) return undefined;
+  const tokens: string[] = [];
+  // Take ONE salient field per sample so each chip is its own input. Rotate
+  // through preferred field names so tokens read like a stream of distinct
+  // generated calls instead of a dense object dump.
+  const preferOrder = [
+    "industry",
+    "company",
+    "size",
+    "signal",
+    "notes",
+    "value_dimension",
+    "tone",
+    "competitor",
+  ];
+  for (const cluster of generated) {
+    for (const sample of cluster.samples) {
+      const i = sample.input as Record<string, unknown>;
+      if (!i || typeof i !== "object") continue;
+      const key = preferOrder.find((k) => i[k] !== undefined) ?? Object.keys(i)[0];
+      if (!key) continue;
+      const v = i[key];
+      if (v === undefined || v === null) continue;
+      const s = String(v).slice(0, 32);
+      tokens.push(`${key}: ${s}`);
+      if (tokens.length >= 24) return tokens;
+    }
+  }
+  return tokens;
 }

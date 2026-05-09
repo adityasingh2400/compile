@@ -86,6 +86,10 @@ export function AgentWritesPage(): JSX.Element {
             <span style={{ background: "#5afca7" }} />
           </span>
           compile · synthesis spec → claude-code
+          <span className="agent-id">
+            <span className="agent-id-dot" />
+            claude-code · sonnet-4.6 · customer key
+          </span>
           <span className="name">fn_classify_ticket_priority.ts</span>
         </header>
         <pre>

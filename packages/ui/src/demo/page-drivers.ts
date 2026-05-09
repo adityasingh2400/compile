@@ -80,7 +80,9 @@ async function ensureScan(getState: GetState): Promise<void> {
 async function ensureDocs(getState: GetState): Promise<void> {
   // Skip when timeline is mid-flight to avoid clobbering in-progress animation
   if (getState().docTokens.length > 0) return;
-  const tokens = DEMO_DOC_TOKENS.map((text, i) => ({
+  const seedSource =
+    getState().fixtures?.generatedSeedTokens ?? DEMO_DOC_TOKENS;
+  const tokens = seedSource.map((text, i) => ({
     id: `t${i}`,
     text,
     x: 8 + (i % 6) * 14,
@@ -99,17 +101,30 @@ async function ensureCells(getState: GetState): Promise<void> {
   // Skip if we already have a substantial population (timeline filled them in)
   if (getState().cells.length >= 1500) return;
   const fx = getState().fixtures;
-  // If we have real recorded cells, replay them but pad up to 4500 by
-  // resampling with cluster preservation so the constellation looks dense.
+  // If we have real recorded cells, replay them — but the synth-loader stub
+  // returns the same shape signature for every call, so re-bin each cell
+  // across HERO_CLUSTERS to preserve visual variety. Real synthesis on a
+  // real candidate path would produce this variety naturally.
   if (fx?.recordedCells && fx.recordedCells.length > 0) {
-    for (const c of fx.recordedCells) getState().pushCell(c);
+    for (let i = 0; i < fx.recordedCells.length; i++) {
+      const c = fx.recordedCells[i]!;
+      const cluster = pickCluster();
+      getState().pushCell({
+        ...c,
+        cluster_id: cluster.cluster_id,
+        tier_assigned: c.tier_assigned ?? cluster.tier,
+      });
+    }
     const padTarget = 4500 - getState().cells.length;
     for (let i = 0; i < padTarget; i++) {
       const seed = fx.recordedCells[i % fx.recordedCells.length]!;
+      const cluster = pickCluster();
       getState().pushCell({
         ...seed,
         input_id: `pad_${i}`,
         worker_id: i % 64,
+        cluster_id: cluster.cluster_id,
+        tier_assigned: cluster.tier,
       });
     }
     return;

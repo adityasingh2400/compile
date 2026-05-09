@@ -84,7 +84,7 @@ export interface RunInputsArgs {
   maxTokensPerCall?: number;
 }
 
-export interface RunResult {
+export interface InputRunResult {
   input: unknown;
   source: GeneratedInput["source"];
   rendered_prompt: string;
@@ -103,13 +103,13 @@ export interface RunSummary {
   total_output_tokens: number;
   total_latency_ms: number;
   /** Estimated USD spend, if a price table is provided to estimateCost. */
-  results: RunResult[];
+  results: InputRunResult[];
 }
 
 export async function runInputs(args: RunInputsArgs): Promise<RunSummary> {
   const limit = args.maxCalls ?? args.inputs.length;
   const slice = args.inputs.slice(0, limit);
-  const results: RunResult[] = [];
+  const results: InputRunResult[] = [];
   let totalIn = 0;
   let totalOut = 0;
   let totalLatency = 0;
