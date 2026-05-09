@@ -20,10 +20,24 @@ const PHASE_ORDER = [
   "result",
 ] as const;
 
+const phaseLiteral = v.union(
+  v.literal("connect"),
+  v.literal("reading_code"),
+  v.literal("classify"),
+  v.literal("reading_docs"),
+  v.literal("expanding"),
+  v.literal("stress_test"),
+  v.literal("clusters_revealed"),
+  v.literal("agent_writing"),
+  v.literal("validate"),
+  v.literal("vault_write"),
+  v.literal("result"),
+);
+
 export const advance = mutation({
   args: {
     run_id: v.string(),
-    phase: v.string(),
+    phase: phaseLiteral,
     page_index: v.number(),
     current_call_site_id: v.optional(v.string()),
     current_request_id: v.optional(v.string()),

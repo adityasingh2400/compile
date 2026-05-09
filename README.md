@@ -169,16 +169,45 @@ npm run dev:mcp
 
 ### Start the UI
 
+The cleanest path is `npm run demo`, which:
+
+1. Spawns a **real** Tensorlake sandbox via the prewarm CLI, captures its
+   real `sandbox_id` / `cpus` / `memory_mb` / `namespace`, and writes them
+   to `packages/ui/public/tensorlake-status.json`.
+2. Probes the **real** Nia vault with a read-only `vaultLookup` to confirm
+   the API key is valid; writes the result to `packages/ui/public/nia-status.json`.
+3. Starts Vite. The audit page boots, fetches both JSON files, and pulls the
+   real metadata into the boot terminal + chrome:
+   - `● TENSORLAKE LIVE` and `● NIA LIVE` badges go green.
+   - The boot terminal renders `tensorlake.Sandbox.create({ image: '…', cpus: <REAL>, … })`
+     followed by `✓ sandbox ready · <REAL_SANDBOX_ID> · real cold start`.
+   - `npx tl sbx ls` shows the same `sandbox_id` running — judges can verify.
+
 ```bash
-npm run dev:ui    # http://localhost:5173
+npm run demo                          # prewarm + dev:ui in one shot
 ```
+
+Or run the steps individually:
+
+```bash
+npm run prewarm:ui                    # spawns a real Tensorlake sandbox + verifies Nia
+npm run dev:ui                        # http://localhost:5173
+```
+
+The prewarmed sandbox is left running for the demo (auto-terminates in
+30 min via `timeoutSecs`). To force-terminate now:
+`npx tl sbx terminate <sandbox_id>` — the sandbox_id is printed by the
+prewarm CLI and visible in the UI's audit chrome.
+
+Without `npm run prewarm:ui`, the audit page falls back to its canned
+animation values (works fully offline).
 
 Append `?source=real` to drive from real scanner output instead of the canned timeline.
 
 ### Cleanup (after demo)
 
 ```bash
-npx tl sbx ls                         # list active sandboxes
+npx tl sbx ls                         # list active sandboxes (incl. the prewarmed one)
 npx tl sbx terminate <ID> [<ID>...]   # terminate them (or just walk away — auto-die in 30 min)
 ```
 
@@ -225,10 +254,12 @@ npx tl sbx terminate <ID> [<ID>...]   # terminate them (or just walk away — au
 ## Useful commands
 
 ```bash
+npm run demo                                # prewarm:ui + dev:ui — real Tensorlake in UI
+npm run prewarm:ui                          # spawn real Tensorlake sandbox + probe Nia, write JSON for UI
 npm run demo:dry-run -w @compile/mcp        # full backend dry-run against real services
-npm run dev:ui                              # UI demo on :5173
+npm run dev:ui                              # UI demo on :5173 (audit chrome falls back to canned values without prewarm)
 npm run dev:mcp                             # MCP stdio server
-npm run warm                                # pre-warm Tensorlake (10 min before demo)
+npm run warm                                # pre-warm Tensorlake (10 min before demo) + run 3 sample Phi inferences
 npm run bench                               # 100K synthetic calls → data/bench/golden.json
 npm run live-smoke -w @compile/runtime      # 3-phase smoke: SDK + gate + Phi
 npm run build:phi-image -w @compile/runtime # rebuild the Tensorlake Phi sandbox image

@@ -1,214 +1,162 @@
-import { useEffect, useState } from "react";
-import { useStore } from "./store.js";
-import { runDemoTimeline } from "./demo/timeline.js";
-import { ensurePhaseContent } from "./demo/page-drivers.js";
-import { resolveFixtures } from "./demo/snapshot-source.js";
-import { ConnectPage } from "./pages/ConnectPage.js";
-import { ReadingCodePage } from "./pages/ReadingCodePage.js";
-import { ClassifyPage } from "./pages/ClassifyPage.js";
-import { ReadingDocsPage } from "./pages/ReadingDocsPage.js";
-import { ExpandingPage } from "./pages/ExpandingPage.js";
-import { StressTestPage } from "./pages/StressTestPage.js";
-import { ClustersRevealedPage } from "./pages/ClustersRevealedPage.js";
-import { AgentWritesPage } from "./pages/AgentWritesPage.js";
-import { ValidatePage } from "./pages/ValidatePage.js";
-import { VaultWritePage } from "./pages/VaultWritePage.js";
-import { ResultPage } from "./pages/ResultPage.js";
-import { PersistentConstellation } from "./components/PersistentConstellation.js";
+/**
+ * Compile redesign — App shell.
+ *
+ * Two top-level stages, driven by the redesign store's `ui_stage`:
+ *
+ *   audit        →  full-screen Tensorlake sandbox + repo audit animation.
+ *                   When the audit completes, ui_stage flips to "workspace"
+ *                   and the audit screen folds out.
+ *   workspace    →  per-workflow tabbed flow. Each tab walks through
+ *                   synthesis → codification → production via
+ *                   useWorkflowDriver().
+ *
+ * Keyboard shortcuts (when not focused in an input):
+ *
+ *   1 / 2 / 3      switch active workflow tab
+ *   ← / →          step pipeline stage backward / forward within active tab
+ *   q / w / e      jump directly to synthesis / codification / production
+ *   r              reset everything → audit
+ *
+ * Note: this redesign supersedes the legacy 11-page Dashboard. A
+ * parallel `components/unified/*` implementation (built by another agent
+ * in the same session) is left in tree but not mounted here.
+ */
+
+import { useEffect } from "react";
 import {
-  BOOTSTRAP_PHASES,
-  PHASE_INDEX,
-  type BootstrapPhase,
-} from "@compile/schemas";
+  useRedesignStore,
+  type PipelineStage,
+} from "./data/redesign-store.js";
+import { CODIFIABLE_WORKFLOWS } from "./data/workflows.js";
+import { AuditStage, resetAuditDriver } from "./redesign/AuditStage.js";
+import { Workspace, resetWorkflowDriver } from "./redesign/Workspace.js";
+import { useTensorlakeStatus } from "./redesign/useTensorlakeStatus.js";
 
-const PAGE_COMPONENT: Record<BootstrapPhase, React.ComponentType> = {
-  connect: ConnectPage,
-  reading_code: ReadingCodePage,
-  classify: ClassifyPage,
-  reading_docs: ReadingDocsPage,
-  expanding: ExpandingPage,
-  stress_test: StressTestPage,
-  clusters_revealed: ClustersRevealedPage,
-  agent_writing: AgentWritesPage,
-  validate: ValidatePage,
-  vault_write: VaultWritePage,
-  result: ResultPage,
-};
-
-const PAGE_LABEL: Record<BootstrapPhase, string> = {
-  connect: "CONNECT",
-  reading_code: "READING YOUR CODE",
-  classify: "CLASSIFY · CODIFIABILITY DECIDED",
-  reading_docs: "READING YOUR DOCS",
-  expanding: "EXPANDING TO 100,000",
-  stress_test: "STRESS TEST · CONSTELLATION",
-  clusters_revealed: "CLUSTERS REVEALED",
-  agent_writing: "THE AGENT WRITES THE CODE",
-  validate: "VALIDATE",
-  vault_write: "VAULT WRITE",
-  result: "RESULT",
-};
-
-const CONSTELLATION_PHASES: BootstrapPhase[] = [
-  "stress_test",
-  "clusters_revealed",
-  "agent_writing",
+const PIPELINE_ORDER: PipelineStage[] = [
+  "synthesis",
+  "codification",
+  "production",
 ];
 
 export function App(): JSX.Element {
-  const phase = useStore((s) => s.phase);
-  const pageIndex = useStore((s) => s.page_index);
-  const cells = useStore((s) => s.cells);
-  const reset = useStore((s) => s.reset);
-  const jumpToPhase = useStore((s) => s.jumpToPhase);
-  const [showOps, setShowOps] = useState(false);
+  // Pull real Tensorlake + Nia metadata from the prewarm-written JSON
+  // files. Mount-once; later daemon stream events override.
+  useTensorlakeStatus();
 
-  // resolve data source first (baked fixtures vs real scanner snapshot),
-  // then start the timeline.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const fx = await resolveFixtures();
-      if (cancelled) return;
-      useStore.getState().setFixtures(fx);
-      setTimeout(() => {
-        runDemoTimeline(useStore.getState).catch((err) => console.error(err));
-      }, 800);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const stage = useRedesignStore((s) => s.ui_stage);
+  const auditPhase = useRedesignStore((s) => s.audit.phase);
+  const setActiveWorkflow = useRedesignStore((s) => s.setActiveWorkflow);
+  const setPipelineStage = useRedesignStore((s) => s.setPipelineStage);
+  const resetAll = useRedesignStore((s) => s.resetAll);
 
-  // page-mount drivers — keep each phase looking live even when an operator
-  // jumps directly to it (failure mode #4 fallback)
   useEffect(() => {
-    ensurePhaseContent(phase, useStore.getState).catch((err) => console.error(err));
-  }, [phase]);
-
-  // operator hotkeys (failure mode #4 — keyboard override for live demo)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent): void => {
       if (e.target instanceof HTMLInputElement) return;
-      if (e.key === " " || e.key === "ArrowRight") {
+      if (e.target instanceof HTMLTextAreaElement) return;
+      const state = useRedesignStore.getState();
+      const activeId = state.active_workflow_id;
+      const slice = activeId ? state.workflows[activeId] : null;
+      const cur = slice?.pipeline ?? "synthesis";
+
+      if (e.key >= "1" && e.key <= "9") {
+        const idx = parseInt(e.key, 10) - 1;
+        const wf = CODIFIABLE_WORKFLOWS[idx];
+        if (wf) {
+          e.preventDefault();
+          setActiveWorkflow(wf.id);
+        }
+        return;
+      }
+
+      if (e.key === "ArrowRight") {
+        if (!activeId) return;
+        const i = PIPELINE_ORDER.indexOf(cur);
+        const next = PIPELINE_ORDER[Math.min(PIPELINE_ORDER.length - 1, i + 1)];
+        if (next) {
+          e.preventDefault();
+          setPipelineStage(activeId, next);
+        }
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        if (!activeId) return;
+        const i = PIPELINE_ORDER.indexOf(cur);
+        const prev = PIPELINE_ORDER[Math.max(0, i - 1)];
+        if (prev) {
+          e.preventDefault();
+          setPipelineStage(activeId, prev);
+        }
+        return;
+      }
+      if (e.key === "q" || e.key === "Q") {
+        if (activeId) {
+          e.preventDefault();
+          setPipelineStage(activeId, "synthesis");
+        }
+        return;
+      }
+      if (e.key === "w" || e.key === "W") {
+        if (activeId) {
+          e.preventDefault();
+          setPipelineStage(activeId, "codification");
+        }
+        return;
+      }
+      if (e.key === "e" || e.key === "E") {
+        if (activeId) {
+          e.preventDefault();
+          setPipelineStage(activeId, "production");
+        }
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
         e.preventDefault();
-        const cur = useStore.getState().phase;
-        const idx = BOOTSTRAP_PHASES.indexOf(cur);
-        const next = BOOTSTRAP_PHASES[Math.min(BOOTSTRAP_PHASES.length - 1, idx + 1)];
-        if (next) jumpToPhase(next);
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        const cur = useStore.getState().phase;
-        const idx = BOOTSTRAP_PHASES.indexOf(cur);
-        const prev = BOOTSTRAP_PHASES[Math.max(0, idx - 1)];
-        if (prev) jumpToPhase(prev);
-      } else if (e.key === "r" || e.key === "R") {
-        reset();
-        runDemoTimeline(useStore.getState).catch((err) => console.error(err));
-      } else if (e.key === "o" || e.key === "O") {
-        setShowOps((v) => !v);
-      } else if (e.key >= "1" && e.key <= "9") {
-        const i = parseInt(e.key, 10);
-        const target = BOOTSTRAP_PHASES[i - 1];
-        if (target) jumpToPhase(target);
+        resetAuditDriver();
+        resetWorkflowDriver();
+        resetAll();
+        // Force a remount so the audit timeline restarts cleanly.
+        window.location.reload();
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [jumpToPhase, reset]);
+  }, [setActiveWorkflow, setPipelineStage, resetAll]);
 
-  const constellationVisible = CONSTELLATION_PHASES.includes(phase);
-  const constellationCentroidsRevealed =
-    phase === "clusters_revealed" || phase === "agent_writing";
-  const constellationDimmed = phase === "agent_writing";
+  const showAudit = stage === "audit" || auditPhase === "transition";
+  const showWorkspace = stage === "workspace";
+  const folding = auditPhase === "transition";
 
   return (
-    <div className="app">
-      <PersistentConstellation
-        cells={cells}
-        visible={constellationVisible}
-        centroidsRevealed={constellationCentroidsRevealed}
-        dimmed={constellationDimmed}
-      />
-
-      <PhaseProgress phaseIndex={pageIndex} />
-
-      {BOOTSTRAP_PHASES.map((p) => {
-        const Page = PAGE_COMPONENT[p];
-        const isActive = p === phase;
-        return (
-          <div key={p} className={`page ${isActive ? "active" : ""}`} style={{ zIndex: 2 }}>
-            <div className="page-corner">
-              compile · acme/agent
-              <SourceBadge />
-              · <b>{PAGE_LABEL[p]}</b>
-            </div>
-            <div className="page-counter">
-              page <b>{PHASE_INDEX[p].toString().padStart(2, "0")}</b> / 11
-            </div>
-            {isActive ? <Page /> : null}
-          </div>
-        );
-      })}
-
-      {showOps ? (
-        <div className="dev-controls">
-          <button
-            onClick={() => {
-              reset();
-              runDemoTimeline(useStore.getState).catch((err) => console.error(err));
-            }}
-          >
-            ↻ replay
-          </button>
-          {BOOTSTRAP_PHASES.map((p, i) => (
-            <button key={p} onClick={() => jumpToPhase(p)}>
-              {i + 1}
-            </button>
-          ))}
+    <div className="rd-app">
+      {showAudit ? (
+        <div className={`rd-audit-layer ${folding ? "folding-out" : ""}`}>
+          <AuditStage />
         </div>
       ) : null}
-
-      <div className="hotkey-hint">space · ← → · 1-9 · r · o</div>
-    </div>
-  );
-}
-
-function SourceBadge(): JSX.Element | null {
-  const fx = useStore((s) => s.fixtures);
-  if (!fx || fx.source !== "real") return null;
-  return (
-    <>
-      {" "}
-      <span
-        style={{
-          color: "var(--green)",
-          fontSize: 9,
-          marginLeft: 6,
-          marginRight: 4,
-          letterSpacing: "0.18em",
-          padding: "1px 6px",
-          border: "1px solid var(--green)",
-          borderRadius: 3,
-        }}
-      >
-        LIVE
-      </span>
-    </>
-  );
-}
-
-function PhaseProgress({ phaseIndex }: { phaseIndex: number }): JSX.Element {
-  return (
-    <div className="phase-progress">
-      {Array.from({ length: 11 }, (_, i) => i + 1).map((i) => (
-        <div
-          key={i}
-          className={`tick ${i <= phaseIndex ? "done" : ""} ${
-            i === phaseIndex ? "current" : ""
-          }`}
-        />
-      ))}
+      {showWorkspace ? (
+        <div className="rd-workspace-layer">
+          <Workspace />
+        </div>
+      ) : null}
+      <div className="rd-hotkeys">
+        <span>tabs</span>
+        <kbd>1</kbd>
+        <kbd>2</kbd>
+        <kbd>3</kbd>
+        <span className="sep">·</span>
+        <span>stages</span>
+        <kbd>←</kbd>
+        <kbd>→</kbd>
+        <span className="sep">·</span>
+        <span>jump</span>
+        <kbd>q</kbd>
+        <kbd>w</kbd>
+        <kbd>e</kbd>
+        <span className="sep">·</span>
+        <span>reset</span>
+        <kbd>r</kbd>
+      </div>
     </div>
   );
 }

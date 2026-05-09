@@ -19,7 +19,8 @@
     "generate:inputs": "tsx src/inputs/cli.ts",
     "warm": "node --env-file-if-exists=../../.env.local ./dist/warm-cli.js",
     "live-smoke": "node --env-file=../../.env.local ./dist/tensorlake-smoke.js",
-    "build:phi-image": "node --env-file=../../.env.local ./dist/build-phi-image.js"
+    "build:phi-image": "node --env-file=../../.env.local ./dist/build-phi-image.js",
+    "prewarm:ui": "node --env-file=../../.env.local ./dist/prewarm-ui.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",

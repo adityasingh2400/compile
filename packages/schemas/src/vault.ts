@@ -35,6 +35,13 @@ export const NegativeVaultEntrySchema = z.object({
   retry_policy: RetryPolicySchema,
   trace_count_at_decision: z.number().int().nonnegative(),
   created_at: z.string().datetime(),
+  /**
+   * Call-site git SHA at the time the negative was written. Used by the
+   * freshness check when retry_policy.retry_on_code_change is true: a
+   * different SHA means the underlying code changed and the cluster is
+   * worth re-attempting.
+   */
+  code_sha_at_decision: z.string().optional(),
 });
 export type NegativeVaultEntry = z.infer<typeof NegativeVaultEntrySchema>;
 

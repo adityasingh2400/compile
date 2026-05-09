@@ -1,0 +1,7 @@
+{
+  "name": "folk-agent",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Folk by Nozomio — personal AI agent that lives in your iMessage / Telegram / Discord. Demo customer repo scanned by Compile during the 90-second bootstrap. Mirror of the production architecture; not a real package.",
+  "type": "module"
+}

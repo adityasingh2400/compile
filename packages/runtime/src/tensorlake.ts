@@ -441,30 +441,96 @@ for (const t of traces) {
  * "local fallback" here is the runtime-equivalent of the disk replay: the
  * gate / candidate path keeps producing outputs even if Tensorlake is dark.
  */
+/** Methods on which the fallback can engage. */
+export type TensorlakeFallbackMethod =
+  | "runEmittedFunction"
+  | "runPhi"
+  | "warm";
+
+/** Resolved-event surface — emitted AFTER the fallback path has either
+ *  produced a result (`recovered=true`) or itself thrown (`recovered=false`).
+ *  The daemon turns this into a `fallback_engaged` event for the UI. */
+export interface TensorlakeFallbackResolution {
+  method: TensorlakeFallbackMethod;
+  /** Original error from the primary client. */
+  error: unknown;
+  /** True once the fallback produced a result; false if it also threw. */
+  recovered: boolean;
+  /** ISO timestamp when the primary failure was observed. */
+  ts: string;
+}
+
 export class TensorlakeWithLocalFallback implements ITensorlakeClient {
   private fallbackEngaged = false;
+  private fallbackCount = 0;
+  private lastFallback: TensorlakeFallbackResolution | null = null;
+
   constructor(
     private readonly primary: ITensorlakeClient,
     private readonly fallback: ITensorlakeClient,
+    /** Legacy hook — fires the moment the primary throws, before the
+     *  fallback is attempted. Backward-compatible with pre-Lane-X callers. */
     private readonly onFallback: (
-      method: "runEmittedFunction" | "runPhi" | "warm",
+      method: TensorlakeFallbackMethod,
       err: unknown,
     ) => void = (m, e) => {
       console.error(`[tensorlake] primary failed in ${m}: ${(e as Error).message}; using local fallback`);
     },
+    /** Resolved hook — fires AFTER the fallback completes (success or
+     *  failure). The daemon uses this to emit a `fallback_engaged` event
+     *  with `recovered=true|false` so the UI can flash the right banner. */
+    private readonly onFallbackResolved?: (
+      event: TensorlakeFallbackResolution,
+    ) => void,
   ) {}
 
   isFallbackEngaged(): boolean {
     return this.fallbackEngaged;
   }
 
+  /** Number of times the fallback path has engaged this session. */
+  getFallbackCount(): number {
+    return this.fallbackCount;
+  }
+
+  /** Most recent resolved fallback — useful when the daemon emits
+   *  `fallback_engaged` daemon events. */
+  getLastFallback(): TensorlakeFallbackResolution | null {
+    return this.lastFallback;
+  }
+
+  private resolve(method: TensorlakeFallbackMethod, error: unknown, recovered: boolean): void {
+    this.fallbackEngaged = true;
+    this.fallbackCount++;
+    this.lastFallback = {
+      method,
+      error,
+      recovered,
+      ts: new Date().toISOString(),
+    };
+    if (this.onFallbackResolved) {
+      try {
+        this.onFallbackResolved(this.lastFallback);
+      } catch (cbErr) {
+        // The hook is observability — never let it take the request down.
+        console.error("[tensorlake] onFallbackResolved callback threw:", cbErr);
+      }
+    }
+  }
+
   async runEmittedFunction(args: RunEmittedFunctionArgs): Promise<RunEmittedFunctionResult> {
     try {
       return await this.primary.runEmittedFunction(args);
     } catch (err) {
-      this.fallbackEngaged = true;
       this.onFallback("runEmittedFunction", err);
-      return await this.fallback.runEmittedFunction(args);
+      try {
+        const result = await this.fallback.runEmittedFunction(args);
+        this.resolve("runEmittedFunction", err, true);
+        return result;
+      } catch (fallbackErr) {
+        this.resolve("runEmittedFunction", err, false);
+        throw fallbackErr;
+      }
     }
   }
 
@@ -472,9 +538,15 @@ export class TensorlakeWithLocalFallback implements ITensorlakeClient {
     try {
       return await this.primary.runPhi(args);
     } catch (err) {
-      this.fallbackEngaged = true;
       this.onFallback("runPhi", err);
-      return await this.fallback.runPhi(args);
+      try {
+        const result = await this.fallback.runPhi(args);
+        this.resolve("runPhi", err, true);
+        return result;
+      } catch (fallbackErr) {
+        this.resolve("runPhi", err, false);
+        throw fallbackErr;
+      }
     }
   }
 
@@ -482,9 +554,14 @@ export class TensorlakeWithLocalFallback implements ITensorlakeClient {
     try {
       await this.primary.warm();
     } catch (err) {
-      this.fallbackEngaged = true;
       this.onFallback("warm", err);
-      await this.fallback.warm();
+      try {
+        await this.fallback.warm();
+        this.resolve("warm", err, true);
+      } catch (fallbackErr) {
+        this.resolve("warm", err, false);
+        throw fallbackErr;
+      }
     }
   }
 }
