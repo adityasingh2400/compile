@@ -120,11 +120,13 @@ export interface Workflow {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 1) classify_ticket_priority — tier-1 hero workflow.
-//    7 sub-patterns (6 T1 + 1 T2 fallback). Mirrors the existing
-//    DEMO_AGENT_CODE so judges see consistency between stages.
+// LEGACY hand-tuned fixtures — retained as a fallback only.
+// `WORKFLOWS` / `CODIFIABLE_WORKFLOWS` / `AUDIT_CALL_SITES` below are
+// derived from real proxy traces via `derive-workflows.ts`. These
+// constants are kept so tests + the demo can still render with no
+// trace input.
 
-const TICKET_PRIORITY: Workflow = {
+const FALLBACK_TICKET_PRIORITY: Workflow = {
   id: "wf_ticket_priority",
   file_path: "src/ops.ts",
   call_site_id: "ops:classify_ticket_priority",
@@ -356,7 +358,7 @@ export const fallback_phi_classifier = (input: TicketInput) =>
 // ─────────────────────────────────────────────────────────────────────
 // 2) match_product_sku — tier-1, narrower domain, more deterministic.
 
-const MATCH_SKU: Workflow = {
+const FALLBACK_MATCH_SKU: Workflow = {
   id: "wf_match_sku",
   file_path: "src/ops.ts",
   call_site_id: "ops:match_product_sku",
@@ -570,7 +572,7 @@ export const fallback_phi_sku = (input: SkuInput) =>
 //    where most clusters are codified but the long tail still routes
 //    to phi.
 
-const LEAD_TIER: Workflow = {
+const FALLBACK_LEAD_TIER: Workflow = {
   id: "wf_lead_tier",
   file_path: "src/icp.ts",
   call_site_id: "icp:classify_lead_tier",
@@ -802,8 +804,6 @@ export const fallback_phi_lead = (input: LeadInput) =>
   },
 };
 
-export const WORKFLOWS: Workflow[] = [TICKET_PRIORITY, MATCH_SKU, LEAD_TIER];
-
 /**
  * The audit-stage call-site list. Includes both codifiable and rejected
  * sites so the audit visually demonstrates the *filter*, not just the
@@ -822,109 +822,72 @@ export interface AuditCallSite {
   workflow_id?: string;
 }
 
-export const AUDIT_CALL_SITES: AuditCallSite[] = [
-  // Tier-1 codifiable
+const FALLBACK_WORKFLOWS: Workflow[] = [
+  FALLBACK_TICKET_PRIORITY,
+  FALLBACK_MATCH_SKU,
+  FALLBACK_LEAD_TIER,
+];
+
+const FALLBACK_AUDIT_CALL_SITES: AuditCallSite[] = [
   {
-    call_site_id: TICKET_PRIORITY.call_site_id,
-    function_hint: TICKET_PRIORITY.function_name,
-    file_path: TICKET_PRIORITY.file_path,
+    call_site_id: FALLBACK_TICKET_PRIORITY.call_site_id,
+    function_hint: FALLBACK_TICKET_PRIORITY.function_name,
+    file_path: FALLBACK_TICKET_PRIORITY.file_path,
     line: 22,
     outcome: "tier_1",
-    monthly_calls: TICKET_PRIORITY.monthly_calls,
+    monthly_calls: FALLBACK_TICKET_PRIORITY.monthly_calls,
     reason:
       "static prompt · zod schema · temperature 0 · followed by structured parse",
-    workflow_id: TICKET_PRIORITY.id,
+    workflow_id: FALLBACK_TICKET_PRIORITY.id,
   },
   {
-    call_site_id: MATCH_SKU.call_site_id,
-    function_hint: MATCH_SKU.function_name,
-    file_path: MATCH_SKU.file_path,
+    call_site_id: FALLBACK_MATCH_SKU.call_site_id,
+    function_hint: FALLBACK_MATCH_SKU.function_name,
+    file_path: FALLBACK_MATCH_SKU.file_path,
     line: 78,
     outcome: "tier_1",
-    monthly_calls: MATCH_SKU.monthly_calls,
+    monthly_calls: FALLBACK_MATCH_SKU.monthly_calls,
     reason: "deterministic catalog lookup · 4-field input · response_format",
-    workflow_id: MATCH_SKU.id,
+    workflow_id: FALLBACK_MATCH_SKU.id,
   },
-  // Tier-2 codifiable
   {
-    call_site_id: LEAD_TIER.call_site_id,
-    function_hint: LEAD_TIER.function_name,
-    file_path: LEAD_TIER.file_path,
+    call_site_id: FALLBACK_LEAD_TIER.call_site_id,
+    function_hint: FALLBACK_LEAD_TIER.function_name,
+    file_path: FALLBACK_LEAD_TIER.file_path,
     line: 22,
     outcome: "tier_2",
-    monthly_calls: LEAD_TIER.monthly_calls,
+    monthly_calls: FALLBACK_LEAD_TIER.monthly_calls,
     reason:
       "stable schema · soft determinism · phi-3-mini covers the long tail",
-    workflow_id: LEAD_TIER.id,
-  },
-  // Negatives — won't cluster well, get carved out into negative vault
-  {
-    call_site_id: "icp:extract_invoice_fields",
-    function_hint: "extract_invoice_fields",
-    file_path: "src/icp.ts",
-    line: 48,
-    outcome: "negative",
-    monthly_calls: 38_000,
-    reason: "tier_3 · variable schema across providers, holdout 71%",
-  },
-  {
-    call_site_id: "ops:classify_sentiment",
-    function_hint: "classify_sentiment",
-    file_path: "src/ops.ts",
-    line: 50,
-    outcome: "negative",
-    monthly_calls: 14_400,
-    reason: "subjective output · low oracle agreement (61%)",
-  },
-  {
-    call_site_id: "icp:resolve_company_domain",
-    function_hint: "resolve_company_domain",
-    file_path: "src/icp.ts",
-    line: 62,
-    outcome: "negative",
-    monthly_calls: 7_200,
-    reason: "open-set output · catalog explosion",
-  },
-  {
-    call_site_id: "icp:summarize_support_thread",
-    function_hint: "summarize_support_thread",
-    file_path: "src/icp.ts",
-    line: 76,
-    outcome: "negative",
-    monthly_calls: 5_900,
-    reason: "long-form generation · no codifiable structure",
-  },
-  {
-    call_site_id: "icp:draft_outreach_subject",
-    function_hint: "draft_outreach_subject",
-    file_path: "src/icp.ts",
-    line: 90,
-    outcome: "negative",
-    monthly_calls: 3_400,
-    reason: "creative_task · novelty required",
-  },
-  {
-    call_site_id: "ops:generate_marketing_copy",
-    function_hint: "generate_marketing_copy",
-    file_path: "src/ops.ts",
-    line: 70,
-    outcome: "negative",
-    monthly_calls: 2_900,
-    reason: "creative_task · brand-voice drift",
-  },
-  {
-    call_site_id: "ops:freeform_chat_handler",
-    function_hint: "freeform_chat_handler",
-    file_path: "src/ops.ts",
-    line: 88,
-    outcome: "negative",
-    monthly_calls: 1_400,
-    reason: "novel_reasoning_required",
+    workflow_id: FALLBACK_LEAD_TIER.id,
   },
 ];
 
+// Resolve real workflows from proxy-traces.jsonl. Falls back to the
+// hand-tuned constants above when the trace file is missing/empty.
+import { deriveAll } from "./derive-workflows.js";
+
+const DERIVED = deriveAll();
+
+export const WORKFLOWS: Workflow[] =
+  DERIVED.workflows.length > 0 ? DERIVED.workflows : FALLBACK_WORKFLOWS;
+
+export const AUDIT_CALL_SITES: AuditCallSite[] =
+  DERIVED.auditCallSites.length > 0
+    ? DERIVED.auditCallSites
+    : FALLBACK_AUDIT_CALL_SITES;
+
 /** Codifiable workflows (the survivors of the audit). One tab per. */
 export const CODIFIABLE_WORKFLOWS: Workflow[] = WORKFLOWS;
+
+/** Identifies whether the data came from real proxy traces or the fallback. */
+export const WORKFLOW_DATA_SOURCE: "live" | "fallback" =
+  DERIVED.workflows.length > 0 ? DERIVED.source : "fallback";
+
+/** Aggregate stats — surfaced in the audit + workspace chrome. */
+export const OBSERVED_SPEND_24H: number = DERIVED.observedSpend24h;
+export const TRACE_COUNT: number = DERIVED.traceCount;
+export const OBSERVED_SITE_COUNT: number = DERIVED.siteCount;
 
 /** Convenience accessor used by every page. */
 export function getWorkflowById(id: string): Workflow | undefined {

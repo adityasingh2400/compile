@@ -82,6 +82,49 @@ export interface ProductionState {
   dollars_saved: number;
 }
 
+/**
+ * Real-Tensorlake connection state. Populated by `useTensorlakeStatus`
+ * (fetches the static `/tensorlake-status.json` produced by the prewarm
+ * CLI) and/or by daemon `sandbox_spawn_start` events. When `connected`
+ * is true the audit chrome flips to "LIVE TENSORLAKE" + displays the
+ * real sandbox metadata; when false the visuals fall back to canned
+ * fixture values so the demo still flows offline.
+ */
+export interface TensorlakeStatus {
+  connected: boolean;
+  /** Real `Sandbox.create()` id from Tensorlake. */
+  sandbox_id: string | null;
+  /** Resolved image name (e.g. `compile-phi-mini` or undefined for default). */
+  image: string | null;
+  /** Sandbox status: pending|running|terminated|… */
+  status: string | null;
+  /** Resources reported by the SDK (cpus, memoryMb, diskMb). */
+  cpus: number | null;
+  memory_mb: number | null;
+  /** Tensorlake namespace + project+org IDs (org/project just first 8 chars
+   *  for display). */
+  namespace: string | null;
+  organization_id: string | null;
+  project_id: string | null;
+  /** Where the sandbox was spawned from. `prewarm` = local CLI, `daemon` =
+   *  friend's always-on daemon emitted a sandbox_spawn_start event,
+   *  `null` = offline / no signal. */
+  source: "prewarm" | "daemon" | null;
+  /** ISO timestamp of the sandbox creation. */
+  created_at: string | null;
+  /** ISO timestamp when the prewarm CLI wrote the status file. */
+  fetched_at: string | null;
+}
+
+/** Real-Nia connection state — drives the small Nia chrome badge. */
+export interface NiaStatus {
+  connected: boolean;
+  vault_id: string | null;
+  /** Total entries currently in the vault (from the prewarm + lookup probe). */
+  vault_entries: number | null;
+  fetched_at: string | null;
+}
+
 export interface WorkflowSlice {
   pipeline: PipelineStage;
   synthesis: SynthesisState;
@@ -122,6 +165,8 @@ export interface RedesignState {
   audit: AuditState;
   active_workflow_id: string | null;
   workflows: Record<string, WorkflowSlice>;
+  tensorlake: TensorlakeStatus;
+  nia: NiaStatus;
 
   // Actions
   setUiStage(stage: "audit" | "workspace"): void;
@@ -142,6 +187,8 @@ export interface RedesignState {
   startCodifyCluster(workflowId: string, clusterId: string): void;
   setCodeProgress(workflowId: string, clusterId: string, chars: number): void;
   commitClusterToVault(workflowId: string, clusterId: string): void;
+  setTensorlakeStatus(patch: Partial<TensorlakeStatus>): void;
+  setNiaStatus(patch: Partial<NiaStatus>): void;
   resetAll(): void;
 }
 
@@ -160,11 +207,35 @@ function initialWorkflows(): Record<string, WorkflowSlice> {
   return slices;
 }
 
+const initialTensorlake = (): TensorlakeStatus => ({
+  connected: false,
+  sandbox_id: null,
+  image: null,
+  status: null,
+  cpus: null,
+  memory_mb: null,
+  namespace: null,
+  organization_id: null,
+  project_id: null,
+  source: null,
+  created_at: null,
+  fetched_at: null,
+});
+
+const initialNia = (): NiaStatus => ({
+  connected: false,
+  vault_id: null,
+  vault_entries: null,
+  fetched_at: null,
+});
+
 export const useRedesignStore = create<RedesignState>((set) => ({
   ui_stage: "audit",
   audit: initialAudit(),
   active_workflow_id: CODIFIABLE_WORKFLOWS[0]?.id ?? null,
   workflows: initialWorkflows(),
+  tensorlake: initialTensorlake(),
+  nia: initialNia(),
 
   setUiStage: (stage) => set({ ui_stage: stage }),
   setAuditPhase: (phase) =>
@@ -299,13 +370,22 @@ export const useRedesignStore = create<RedesignState>((set) => ({
         },
       };
     }),
+  setTensorlakeStatus: (patch) =>
+    set((s) => ({ tensorlake: { ...s.tensorlake, ...patch } })),
+  setNiaStatus: (patch) =>
+    set((s) => ({ nia: { ...s.nia, ...patch } })),
   resetAll: () =>
-    set({
+    set((s) => ({
       ui_stage: "audit",
       audit: initialAudit(),
       active_workflow_id: CODIFIABLE_WORKFLOWS[0]?.id ?? null,
       workflows: initialWorkflows(),
-    }),
+      // Don't blow away the live-status read; once we know real Tensorlake
+      // is connected, a UI reset shouldn't fall back to "no signal" — the
+      // sandbox is still running on Tensorlake's side.
+      tensorlake: s.tensorlake,
+      nia: s.nia,
+    })),
 }));
 
 /** Convenience hook — workflow slice for the active tab. */

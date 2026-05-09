@@ -309,6 +309,43 @@ function PipelineNav({
   );
 }
 
+/**
+ * Tiny "powered by" service badges that stay visible across the
+ * workspace. Drives off the same `tensorlake` / `nia` slices the audit
+ * stage uses, so a successful prewarm lights both up green for the
+ * entire demo.
+ */
+function WorkspaceLiveBadges(): JSX.Element {
+  const tl = useRedesignStore((s) => s.tensorlake);
+  const nia = useRedesignStore((s) => s.nia);
+  return (
+    <div className="ws-svc-badges">
+      <span
+        className={`ws-svc ${tl.connected ? "live" : "offline"}`}
+        title={
+          tl.connected
+            ? `tensorlake · sandbox=${tl.sandbox_id ?? "?"} · ${tl.cpus ?? "?"} vCPU · ${tl.memory_mb ?? "?"}MB`
+            : "tensorlake · offline"
+        }
+      >
+        <span className="ws-svc-dot" />
+        tensorlake
+      </span>
+      <span
+        className={`ws-svc ${nia.connected ? "live" : "offline"}`}
+        title={
+          nia.connected
+            ? `nia · vault=${nia.vault_id ?? "?"} · reachable`
+            : "nia · offline"
+        }
+      >
+        <span className="ws-svc-dot" />
+        nia
+      </span>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Top-level Workspace
 
@@ -329,6 +366,7 @@ export function Workspace(): JSX.Element {
           <span className="ws-brand-mark">●</span>
           <b>compile</b>
           <span className="dim">/ workspace</span>
+          <WorkspaceLiveBadges />
         </div>
         <WorkspaceTabBar />
         <GlobalSavings />

@@ -30,18 +30,66 @@ import {
 
 // ─────────────────────────────────────────────────────────────────────
 // Boot lines — typewriter into the sandbox terminal.
+//
+// `buildBootLines()` substitutes the real sandbox_id and resources from
+// `tensorlake-status.json` when prewarm has written it; otherwise the
+// canned values keep the offline demo readable.
 
-const BOOT_LINES: { ts: string; level: "info" | "ok" | "warn"; text: string }[] = [
-  { ts: "00:00.013", level: "info", text: "tensorlake.Sandbox.create({ image: 'compile-audit-agent' })" },
-  { ts: "00:00.214", level: "info", text: "  · pulling layers — base, node22, ts-morph, tree-sitter" },
-  { ts: "00:00.731", level: "info", text: "  · microvm boot · alloc 4 vCPU / 8GB · region us-west-2" },
-  { ts: "00:01.027", level: "ok",   text: "✓ sandbox ready · sb_audit_4f12ae · 4012ms cold start" },
-  { ts: "00:01.044", level: "info", text: "agent.audit({ repo: 'data/acme-agent' })" },
-  { ts: "00:01.061", level: "info", text: "  · git rev-parse HEAD → a3f2d1b" },
-  { ts: "00:01.118", level: "info", text: "  · ts-morph project · loading tsconfig.json" },
-  { ts: "00:01.420", level: "ok",   text: "✓ project loaded · 38 source files · 4 packages" },
-  { ts: "00:01.460", level: "info", text: "scanner.findCallSites({ providers: ['openai','anthropic','google'] })" },
-];
+interface BootLine {
+  ts: string;
+  level: "info" | "ok" | "warn";
+  text: string;
+}
+
+function buildBootLines(args: {
+  live: boolean;
+  sandboxId: string;
+  image: string;
+  cpus: number;
+  memMb: number;
+}): BootLine[] {
+  const memGb =
+    args.memMb >= 1024 ? `${(args.memMb / 1024).toFixed(args.memMb % 1024 === 0 ? 0 : 1)}GB` : `${args.memMb}MB`;
+  return [
+    {
+      ts: "00:00.013",
+      level: "info",
+      text: `tensorlake.Sandbox.create({ image: '${args.image}', cpus: ${args.cpus}, memoryMb: ${args.memMb} })`,
+    },
+    { ts: "00:00.214", level: "info", text: "  · pulling layers — base, node22, ts-morph, tree-sitter" },
+    {
+      ts: "00:00.731",
+      level: "info",
+      text: `  · microvm boot · alloc ${args.cpus} vCPU / ${memGb} · region us-west-2`,
+    },
+    {
+      ts: "00:01.027",
+      level: "ok",
+      text: `✓ sandbox ready · ${args.sandboxId}${args.live ? "" : ""} · ${args.live ? "real cold start" : "4012ms cold start"}`,
+    },
+    { ts: "00:01.044", level: "info", text: "agent.audit({ repo: 'data/acme-agent' })" },
+    { ts: "00:01.061", level: "info", text: "  · git rev-parse HEAD → a3f2d1b" },
+    { ts: "00:01.118", level: "info", text: "  · ts-morph project · loading tsconfig.json" },
+    { ts: "00:01.420", level: "ok", text: "✓ project loaded · 38 source files · 4 packages" },
+    {
+      ts: "00:01.460",
+      level: "info",
+      text: "scanner.findCallSites({ providers: ['openai','anthropic','google'] })",
+    },
+  ];
+}
+
+/** Default canned values used by the audit driver before tensorlake-status.json
+ *  has loaded. The driver only reads the COUNT — content is component-side. */
+const DEFAULT_BOOT_LINES = buildBootLines({
+  live: false,
+  sandboxId: "sb_audit_4f12ae",
+  image: "compile-audit-agent",
+  cpus: 4,
+  memMb: 8192,
+});
+
+const BOOT_LINES = DEFAULT_BOOT_LINES;
 
 const SCAN_FILES = [
   "src/index.ts",
@@ -223,6 +271,21 @@ function SandboxParticles(): JSX.Element {
 
 function SandboxFrame(): JSX.Element {
   const phase = useRedesignStore((s) => s.audit.phase);
+  const tl = useRedesignStore((s) => s.tensorlake);
+
+  // When prewarm wrote a real tensorlake-status.json, the sandbox_id /
+  // resources / image fields below are LIVE values straight from the
+  // Tensorlake SDK. Falls through to canned values offline so the demo
+  // still flows when keys aren't set.
+  const live = tl.connected && tl.sandbox_id != null;
+  const sandboxId = tl.sandbox_id ?? "sb_audit_4f12ae";
+  const image = tl.image ?? "compile-audit-agent";
+  const cpus = tl.cpus ?? 4;
+  const memMb = tl.memory_mb ?? 8192;
+  const memDisplay =
+    memMb >= 1024 ? `${(memMb / 1024).toFixed(memMb % 1024 === 0 ? 0 : 1)} GB` : `${memMb} MB`;
+  const region = "us-west-2";
+
   return (
     <div className={`audit-sandbox-frame audit-phase-${phase}`}>
       <div className="audit-sandbox-corners">
@@ -232,16 +295,26 @@ function SandboxFrame(): JSX.Element {
         <span className="corner br" />
       </div>
       <div className="audit-sandbox-meta">
-        <span className="dot live" />
+        <span className={`dot ${live ? "live" : ""}`} />
         <span>tensorlake sandbox</span>
         <span className="sep">·</span>
-        <span>sb_audit_4f12ae</span>
+        <span title={live ? "real Tensorlake sandbox id" : "canned (offline mode)"}>{sandboxId}</span>
         <span className="sep">·</span>
-        <span>image=compile-audit-agent</span>
+        <span>image={image}</span>
         <span className="sep">·</span>
-        <span>region=us-west-2</span>
+        <span>region={region}</span>
         <span className="sep">·</span>
-        <span>4 vCPU · 8 GB</span>
+        <span>
+          {cpus} vCPU · {memDisplay}
+        </span>
+        {live ? (
+          <>
+            <span className="sep">·</span>
+            <span className="audit-live-tag" title={`spawned ${tl.created_at ?? "—"} from ${tl.source ?? "prewarm"}`}>
+              ◉ live
+            </span>
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -250,8 +323,26 @@ function SandboxFrame(): JSX.Element {
 function BootTerminal(): JSX.Element {
   const emitted = useRedesignStore((s) => s.audit.boot_lines_emitted);
   const phase = useRedesignStore((s) => s.audit.phase);
-  const visible = BOOT_LINES.slice(0, emitted);
-  const showCaret = phase === "boot" && emitted < BOOT_LINES.length;
+  const tl = useRedesignStore((s) => s.tensorlake);
+
+  // Substitute live values into the boot lines when we have them. The
+  // driver only ticks `boot_lines_emitted`; the content rendered here
+  // is computed per-render so a late-arriving prewarm fetch upgrades
+  // the visible terminal mid-boot.
+  const lines = useMemo(() => {
+    const live = tl.connected && tl.sandbox_id != null;
+    if (!live) return BOOT_LINES;
+    return buildBootLines({
+      live: true,
+      sandboxId: tl.sandbox_id ?? "sb_audit_4f12ae",
+      image: tl.image ?? "compile-audit-agent",
+      cpus: tl.cpus ?? 4,
+      memMb: tl.memory_mb ?? 8192,
+    });
+  }, [tl.connected, tl.sandbox_id, tl.image, tl.cpus, tl.memory_mb]);
+
+  const visible = lines.slice(0, emitted);
+  const showCaret = phase === "boot" && emitted < lines.length;
   return (
     <div className="audit-terminal">
       <div className="audit-terminal-head">
@@ -259,6 +350,11 @@ function BootTerminal(): JSX.Element {
         <span className="t-dot yellow" />
         <span className="t-dot green" />
         <span className="t-title">agent.audit() · stdout</span>
+        {tl.connected && tl.sandbox_id != null ? (
+          <span className="t-live-tag" title="live tensorlake sandbox">
+            ◉ live
+          </span>
+        ) : null}
       </div>
       <div className="audit-terminal-body">
         {visible.map((line, i) => (
@@ -500,6 +596,7 @@ export function AuditStage(): JSX.Element {
             <span className="audit-brand-mark">●</span>
             <b>compile</b>
             <span className="dim">/ audit</span>
+            <ServiceStatusBadges />
           </div>
           <div className="audit-title">{title}</div>
           <AuditLiveStats />
@@ -512,6 +609,44 @@ export function AuditStage(): JSX.Element {
         <PhaseIndicator />
         <ManifestOverlay />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Small chrome badges showing whether Tensorlake + Nia are reachable.
+ * `live` (green) = real round-trip succeeded via prewarm.
+ * `offline` (gray) = no key, fetch failed, or prewarm not yet run.
+ */
+function ServiceStatusBadges(): JSX.Element {
+  const tl = useRedesignStore((s) => s.tensorlake);
+  const nia = useRedesignStore((s) => s.nia);
+  return (
+    <div className="audit-svc-badges">
+      <span
+        className={`svc ${tl.connected ? "live" : "offline"}`}
+        title={
+          tl.connected
+            ? `tensorlake · sandbox=${tl.sandbox_id ?? "?"} · cpus=${tl.cpus ?? "?"} · mem=${tl.memory_mb ?? "?"}MB · ns=${tl.namespace ?? "?"}`
+            : "tensorlake · offline (run `npm run prewarm:ui` to connect)"
+        }
+      >
+        <span className="svc-dot" />
+        <span className="svc-name">tensorlake</span>
+        <span className="svc-state">{tl.connected ? "live" : "offline"}</span>
+      </span>
+      <span
+        className={`svc ${nia.connected ? "live" : "offline"}`}
+        title={
+          nia.connected
+            ? `nia · vault=${nia.vault_id ?? "?"} · reachable`
+            : "nia · offline (run `npm run prewarm:ui` to connect)"
+        }
+      >
+        <span className="svc-dot" />
+        <span className="svc-name">nia</span>
+        <span className="svc-state">{nia.connected ? "live" : "offline"}</span>
+      </span>
     </div>
   );
 }

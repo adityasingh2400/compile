@@ -3293,6 +3293,11 @@ button {
   width: 6px;
   height: 6px;
   border-radius: 999px;
+  /* offline (no real Tensorlake yet) — dim */
+  background: var(--dim);
+  box-shadow: none;
+}
+.audit-sandbox-meta .dot.live {
   background: var(--green);
   box-shadow: 0 0 6px rgba(90, 252, 167, 0.7);
   animation: audit-pulse 1.4s ease-in-out infinite;
@@ -3302,9 +3307,122 @@ button {
   color: var(--dim);
 }
 
+.audit-live-tag {
+  color: rgba(90, 252, 167, 0.95);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
 @keyframes audit-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(0.85); }
+}
+
+/* — service-status badges in the audit chrome — */
+.audit-svc-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.audit-svc-badges .svc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(15, 17, 22, 0.6);
+}
+
+.audit-svc-badges .svc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dim);
+}
+
+.audit-svc-badges .svc.live {
+  border-color: rgba(90, 252, 167, 0.45);
+  color: rgba(90, 252, 167, 0.95);
+}
+.audit-svc-badges .svc.live .svc-dot {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(90, 252, 167, 0.7);
+  animation: audit-pulse 1.4s ease-in-out infinite;
+}
+
+.audit-svc-badges .svc.offline {
+  color: var(--muted);
+}
+
+.audit-svc-badges .svc-name {
+  font-weight: 600;
+  color: inherit;
+}
+
+.audit-svc-badges .svc-state {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* — terminal "live" tag (next to the title bar dots) — */
+.t-live-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid rgba(90, 252, 167, 0.45);
+  border-radius: 999px;
+  color: rgba(90, 252, 167, 0.95);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* — workspace service badges — */
+.ws-svc-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.ws-svc-badges .ws-svc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(15, 17, 22, 0.6);
+  color: var(--muted);
+}
+
+.ws-svc-badges .ws-svc.live {
+  border-color: rgba(90, 252, 167, 0.45);
+  color: rgba(90, 252, 167, 0.95);
+}
+
+.ws-svc-badges .ws-svc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dim);
+}
+
+.ws-svc-badges .ws-svc.live .ws-svc-dot {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(90, 252, 167, 0.7);
+  animation: audit-pulse 1.4s ease-in-out infinite;
 }
 
 /* Top brand row */
@@ -5884,5 +6002,173 @@ button {
       )
       scale(0.4);
   }
+}
+
+
+/* ──────────────────────────────────────────────────────────────────
+   SYNTHESIS PAGE — minimal redesign.
+   The whole page is the canvas. One bottom-left counter + the
+   cluster halo cards (revealed only after clustering settles).
+   ────────────────────────────────────────────────────────────────── */
+
+.syn-page {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 50% 55%, rgba(90, 252, 167, 0.04), transparent 60%),
+    var(--bg);
+  overflow: hidden;
+}
+
+.syn-canvas-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.syn-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: radial-gradient(circle at 50% 50%, #07090e, #050608 70%, #030406);
+}
+
+.syn-halos {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.syn-halo-leaders {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.syn-halo {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 11px;
+  border: 1px solid var(--dim);
+  border-radius: 6px;
+  background: rgba(8, 10, 14, 0.92);
+  font-family: var(--mono);
+  font-size: 11px;
+  min-width: 170px;
+  max-width: 220px;
+  z-index: 2;
+  animation: syn-halo-in 480ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  backdrop-filter: blur(4px);
+}
+
+@keyframes syn-halo-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -45%) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.syn-halo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.syn-halo-row .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.syn-halo-row .lbl {
+  flex: 1;
+  color: var(--fg);
+  font-weight: 500;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.syn-halo-row .share {
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.syn-halo-primary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--dim);
+  font-size: 10.5px;
+}
+
+.syn-halo-primary .key {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.syn-halo-primary .val {
+  color: var(--fg);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.syn-counter {
+  position: absolute;
+  bottom: 28px;
+  left: 28px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.syn-counter .big {
+  font-family: var(--mono);
+  font-size: 38px;
+  font-weight: 300;
+  color: var(--fg);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  text-shadow: 0 0 18px rgba(122, 223, 255, 0.18);
+}
+
+.syn-counter .lbl {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+.syn-counter .sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgba(232, 234, 238, 0.55);
+  margin-top: 10px;
+  letter-spacing: 0.02em;
+  max-width: 320px;
 }
 

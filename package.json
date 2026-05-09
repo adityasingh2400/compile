@@ -18,6 +18,7 @@
     "snapshot": "npm run snapshot -w @compile/ui",
     "harness": "npm run harness -w @compile/synthesizer",
     "warm": "npm run build -w @compile/runtime && npm run warm -w @compile/runtime",
+    "prewarm:ui": "npm run build -w @compile/nia && npm run build -w @compile/runtime && npm run prewarm:ui -w @compile/runtime",
     "bench": "npm run build -w @compile/synth-loader && npm run bench -w @compile/synth-loader",
     "daemon:fake": "node scripts/serve-fake-daemon.mjs"
   },

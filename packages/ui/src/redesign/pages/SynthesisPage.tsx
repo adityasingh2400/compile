@@ -1,36 +1,13 @@
 /**
- * Synthesis page — node spawn, semantic clustering, and characteristic
- * halo reveal for one workflow.
+ * Synthesis page — minimal.
  *
- * Visual:
+ * The whole page is the canvas. Nodes spawn, drift, and cluster.
+ * When clustering settles, each cluster's defining characteristic
+ * card reveals next to its centroid. That's it.
  *
- *   ┌──────── synthetic input recipe ─────────┐  ┌──── meters ─────┐
- *   │ field name        kind   reason         │  │ 1,000 nodes     │
- *   │ subject           text   most variable  │  │ 7 clusters      │
- *   │ customer_tier     enum   drives prio    │  └─────────────────┘
- *   │ ...                                     │
- *   └────────────────────────── strategies ───┘
- *
- *   ┌────────────────── canvas (full bleed) ───────────────────────┐
- *   │                                                                │
- *   │                  ◌  ◌                                          │
- *   │              ◌ ◌ ✦ ◌ ◌      ┌─ outage:enterprise (28%) ─┐    │
- *   │                ◌ ◌                                            │
- *   │                                                                │
- *   │           ◌ ◌                                                  │
- *   │       ◌ ✦ ◌ ◌                 ┌─ feature_request (13%) ─┐    │
- *   │           ◌                                                    │
- *   └────────────────────────────────────────────────────────────────┘
- *
- * Node placement:
- *   - On spawn, each node lands in a "fan-in" position around its target
- *     centroid. This keeps the early-spawn frames legible — judges see
- *     clustering happening *as* nodes arrive, not as a post-hoc shuffle.
- *   - During the clustering phase a soft "drift" pulls nodes toward
- *     centroid + jitter, with mild brownian motion.
- *   - Once `clustering=false`, the drift becomes elastic so positions
- *     freeze visually with a tiny hum.
- *   - When `show_halos=true`, halo cards animate in next to each centroid.
+ * The only persistent overlay is a small counter in the corner
+ * (synthetic-call count) — chrome stays out of the way of the
+ * centerpiece.
  */
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -45,9 +22,6 @@ function pickClusterIndex(
   i: number,
   clusters: WorkflowCluster[],
 ): number {
-  // Deterministic share-weighted assignment by index. Distributes nodes
-  // proportional to cluster.share but in a stable order so we get the
-  // exact same constellation across remounts.
   const total = clusters.reduce((acc, c) => acc + c.share, 0);
   const t = ((i * 9301 + 49297) % 233280) / 233280;
   let acc = 0;
@@ -59,15 +33,11 @@ function pickClusterIndex(
 }
 
 function hashFloat(n: number): number {
-  // Stable [0,1) for deterministic jitter per node index.
   const x = Math.sin(n * 12.9898) * 43758.5453;
   return x - Math.floor(x);
 }
 
-// Shared resize observer hook — keeps a child div's pixel size in state.
-function useSize(
-  ref: RefObject<HTMLElement>,
-): { w: number; h: number } {
+function useSize(ref: RefObject<HTMLElement>): { w: number; h: number } {
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 1280, h: 720 });
   useEffect(() => {
     const node = ref.current;
@@ -94,7 +64,6 @@ interface Buf {
   r: Float32Array;
   g: Float32Array;
   b: Float32Array;
-  /** lifetime ramp 0..1 for fade-in */
   ramp: Float32Array;
   count: number;
   capacity: number;
@@ -137,13 +106,7 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
     (s) => s.workflows[workflow.id]?.synthesis.show_halos ?? false,
   );
 
-  // Mirror the latest values into a ref so the rAF loop reads them
-  // without re-binding effects every store update.
-  const live = useRef({
-    nodes: nodes_emitted,
-    clustering,
-    showHalos,
-  });
+  const live = useRef({ nodes: nodes_emitted, clustering, showHalos });
   live.current = { nodes: nodes_emitted, clustering, showHalos };
 
   // Ingest new nodes when the visible count grows.
@@ -199,17 +162,14 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
 
-      // Trail-decay clear — slight motion blur.
       ctx.fillStyle = "rgba(5, 6, 8, 0.18)";
       ctx.fillRect(0, 0, w, h);
 
       const cx = w / 2;
       const cy = h / 2;
       const scale = Math.min(w, h) * 0.42;
-
       const k = live.current.clustering ? 2.2 : 4.5;
 
-      // Step physics.
       for (let i = 0; i < buf.count; i++) {
         const dx = buf.tx[i]! - buf.x[i]!;
         const dy = buf.ty[i]! - buf.y[i]!;
@@ -223,7 +183,6 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
         }
       }
 
-      // Render with additive blend for glow.
       ctx.globalCompositeOperation = "lighter";
       for (let i = 0; i < buf.count; i++) {
         const ramp = buf.ramp[i]!;
@@ -239,7 +198,6 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
       }
       ctx.globalCompositeOperation = "source-over";
 
-      // Centroid halos beneath labels.
       if (live.current.showHalos) {
         for (const c of workflow.clusters) {
           const px = cx + c.centroid[0] * scale;
@@ -278,16 +236,16 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
   }, [buf, workflow]);
 
   return (
-    <div ref={containerRef} className="cluster-canvas-host">
-      <canvas ref={ref} className="cluster-canvas" />
+    <div ref={containerRef} className="syn-canvas-host">
+      <canvas ref={ref} className="syn-canvas" />
       {showHalos ? <CharacteristicHalos workflow={workflow} /> : null}
+      <SynthCounter workflow={workflow} />
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Halo info cards — placed near each centroid in screen space.
-// Uses an SVG overlay for clean leader lines from card edge to centroid.
+// Halo info cards — cleaner, single accent line per cluster.
 
 function CharacteristicHalos({
   workflow,
@@ -303,43 +261,37 @@ function CharacteristicHalos({
   const cx = w / 2;
   const cy = h / 2;
 
-  // Compute card placement. Two-pass:
-  //  1. Place each card radially outward from its centroid relative to canvas
-  //     center. Clamp to the viewport.
-  //  2. Resolve overlaps by nudging colliding cards apart along the
-  //     direction between their centers.
+  // Place each card radially outward from its centroid, with a 6-pass
+  // collision resolver so adjacent clusters don't stack.
   const cards = workflow.clusters.map((c) => {
     const px = cx + c.centroid[0] * scale;
     const py = cy + c.centroid[1] * scale;
     const dx = c.centroid[0];
     const dy = c.centroid[1];
     const len = Math.hypot(dx, dy) || 1;
-    const offMag = Math.max(140, scale * 0.26);
+    const offMag = Math.max(150, scale * 0.28);
     const offX = (dx / len) * offMag;
-    const offY = (dy / len) * (offMag * 0.7);
+    const offY = (dy / len) * (offMag * 0.65);
     let cardX = px + offX;
     let cardY = py + offY;
     cardX = Math.max(150, Math.min(w - 230, cardX));
-    cardY = Math.max(60, Math.min(h - 130, cardY));
+    cardY = Math.max(70, Math.min(h - 90, cardY));
     return { c, px, py, cardX, cardY };
   });
 
-  // Pass 2: resolve overlapping card centers — assume each card occupies
-  // ~220×120 and push apart any pair whose centers are closer than that.
+  const minX = 230;
+  const minY = 100;
   for (let pass = 0; pass < 6; pass++) {
     let moved = false;
     for (let i = 0; i < cards.length; i++) {
       for (let j = i + 1; j < cards.length; j++) {
         const a = cards[i]!;
         const b = cards[j]!;
-        const minX = 230;
-        const minY = 130;
         const dxs = b.cardX - a.cardX;
         const dys = b.cardY - a.cardY;
         const overlapX = minX - Math.abs(dxs);
         const overlapY = minY - Math.abs(dys);
         if (overlapX > 0 && overlapY > 0) {
-          // Push along whichever axis has the smaller overlap.
           if (overlapX < overlapY) {
             const sign = dxs >= 0 ? 1 : -1;
             a.cardX -= (overlapX / 2) * sign;
@@ -350,9 +302,9 @@ function CharacteristicHalos({
             b.cardY += (overlapY / 2) * sign;
           }
           a.cardX = Math.max(150, Math.min(w - 230, a.cardX));
-          a.cardY = Math.max(60, Math.min(h - 130, a.cardY));
+          a.cardY = Math.max(70, Math.min(h - 90, a.cardY));
           b.cardX = Math.max(150, Math.min(w - 230, b.cardX));
-          b.cardY = Math.max(60, Math.min(h - 130, b.cardY));
+          b.cardY = Math.max(70, Math.min(h - 90, b.cardY));
           moved = true;
         }
       }
@@ -361,8 +313,8 @@ function CharacteristicHalos({
   }
 
   return (
-    <div ref={ref} className="cluster-halos">
-      <svg className="halo-leaders" width={w} height={h}>
+    <div ref={ref} className="syn-halos">
+      <svg className="syn-halo-leaders" width={w} height={h}>
         {cards.map(({ c, px, py, cardX, cardY }) => (
           <line
             key={c.cluster_id}
@@ -370,106 +322,62 @@ function CharacteristicHalos({
             y1={cardY}
             x2={px}
             y2={py}
-            stroke={`rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.6)`}
+            stroke={`rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.55)`}
             strokeWidth={1}
-            strokeDasharray="3 3"
+            strokeDasharray="3 4"
           />
         ))}
       </svg>
-      {cards.map(({ c, cardX, cardY }, i) => (
-        <div
-          key={c.cluster_id}
-          className={`cluster-halo ${c.tier}`}
-          style={{
-            left: `${cardX}px`,
-            top: `${cardY}px`,
-            animationDelay: `${i * 130}ms`,
-          }}
-        >
-          <div className="halo-head">
-            <span
-              className="dot"
-              style={{
-                background: `rgb(${c.color[0]}, ${c.color[1]}, ${c.color[2]})`,
-              }}
-            />
-            <span className="lbl">{c.label}</span>
-            <span className={`tier ${c.tier}`}>
-              {c.tier === "tier_1" ? "T1" : "T2"}
-            </span>
-            <span className="share">{Math.round(c.share * 100)}%</span>
-          </div>
-          <div className="halo-body">
-            {c.characteristics.map((ch) => (
-              <div className="ch-row" key={ch.key}>
-                <span className="ch-key">{ch.key}</span>
-                <span className="ch-val">{ch.value}</span>
+      {cards.map(({ c, cardX, cardY }, i) => {
+        // Pick the most-illustrative single characteristic — the "→ output"
+        // one when it exists, otherwise the first.
+        const primary =
+          c.characteristics.find((ch) => ch.key.startsWith("→")) ??
+          c.characteristics[0];
+        return (
+          <div
+            key={c.cluster_id}
+            className="syn-halo"
+            style={{
+              left: `${cardX}px`,
+              top: `${cardY}px`,
+              animationDelay: `${i * 100}ms`,
+              borderColor: `rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.55)`,
+              boxShadow: `0 0 28px -6px rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.4)`,
+            }}
+          >
+            <div className="syn-halo-row">
+              <span
+                className="dot"
+                style={{
+                  background: `rgb(${c.color[0]}, ${c.color[1]}, ${c.color[2]})`,
+                  boxShadow: `0 0 10px rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.7)`,
+                }}
+              />
+              <span className="lbl">{c.label}</span>
+              <span className="share">{Math.round(c.share * 100)}%</span>
+            </div>
+            {primary ? (
+              <div className="syn-halo-primary">
+                <span className="key">{primary.key}</span>
+                <span className="val">{primary.value}</span>
               </div>
-            ))}
+            ) : null}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Side panels.
+// Single live counter — bottom-left of the canvas.
 
-function RecipePanel({ workflow }: { workflow: Workflow }): JSX.Element {
-  return (
-    <aside className="syn-recipe">
-      <div className="syn-card-head">
-        <span className="num">01</span>
-        <span className="title">synthetic recipe</span>
-        <span className="hint">audit-chosen</span>
-      </div>
-      <div className="syn-prompt">
-        <span className="dim">prompt</span>
-        <span className="prompt">{workflow.prompt_excerpt}</span>
-      </div>
-      <div className="syn-fields">
-        <div className="syn-fields-head">
-          <span>field</span>
-          <span>kind</span>
-          <span>variation reason</span>
-        </div>
-        {workflow.input_fields.map((f) => (
-          <div key={f.name} className="syn-field">
-            <span className="name">{f.name}</span>
-            <span className="kind">{f.kind}</span>
-            <span className="reason">{f.reason}</span>
-          </div>
-        ))}
-      </div>
-      <div className="syn-strategies">
-        <div className="syn-strategies-head">strategies</div>
-        {workflow.synthetic_strategies.map((s) => (
-          <div key={s.name} className="syn-strategy">
-            <div className="strat-row">
-              <span className="strat-name">{s.name}</span>
-              <span className="strat-share">
-                {Math.round(s.share * 100)}%
-              </span>
-            </div>
-            <div className="strat-bar">
-              <span style={{ width: `${s.share * 100}%` }} />
-            </div>
-            <div className="strat-rationale">{s.rationale}</div>
-          </div>
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function MetersPanel({ workflow }: { workflow: Workflow }): JSX.Element {
+function SynthCounter({ workflow }: { workflow: Workflow }): JSX.Element {
   const slice = useRedesignStore((s) => s.workflows[workflow.id]);
   const emitted = slice?.synthesis.nodes_emitted ?? 0;
   const clustering = slice?.synthesis.clustering ?? true;
   const showHalos = slice?.synthesis.show_halos ?? false;
-  const settled = !clustering;
-
   const narrativeShare =
     workflow.visible_node_count > 0
       ? emitted / workflow.visible_node_count
@@ -477,84 +385,31 @@ function MetersPanel({ workflow }: { workflow: Workflow }): JSX.Element {
   const narrative = Math.floor(
     workflow.narrative_call_count * narrativeShare,
   );
-
+  const subText = !clustering
+    ? showHalos
+      ? `${workflow.clusters.length} clusters · characteristics revealed`
+      : `${workflow.clusters.length} clusters · settling`
+    : emitted < workflow.visible_node_count
+      ? `${emitted.toLocaleString()} visible nodes · fan-in from edges`
+      : `${emitted.toLocaleString()} visible nodes · drifting toward centroids`;
   return (
-    <aside className="syn-meters">
-      <div className="syn-card-head right">
-        <span className="num">02</span>
-        <span className="title">live meters</span>
-        <span className="hint">tensorlake grid</span>
+    <div className="syn-counter">
+      <div className="big">{narrative.toLocaleString()}</div>
+      <div className="lbl">
+        of {workflow.narrative_call_count.toLocaleString()} synthetic calls
       </div>
-      <div className="syn-meter-big">
-        <div className="big">{narrative.toLocaleString()}</div>
-        <div className="lbl">
-          of {workflow.narrative_call_count.toLocaleString()} synthetic calls
-        </div>
-      </div>
-      <div className="syn-meter-row">
-        <div className="cell">
-          <div className="big">{emitted.toLocaleString()}</div>
-          <div className="lbl">visible nodes</div>
-        </div>
-        <div className="cell">
-          <div className="big">{workflow.clusters.length}</div>
-          <div className="lbl">clusters</div>
-        </div>
-      </div>
-      <div className="syn-state">
-        <div className="row">
-          <span className={`pill ${emitted > 0 ? "active" : ""}`}>
-            {emitted > 0 ? "spawning" : "idle"}
-          </span>
-          <span className={`pill ${clustering ? "active" : "done"}`}>
-            {clustering ? "clustering" : "settled"}
-          </span>
-          <span className={`pill ${showHalos ? "active" : ""}`}>
-            {showHalos ? "halos lit" : "halos off"}
-          </span>
-        </div>
-        <div className="hint dim">
-          {emitted < workflow.visible_node_count
-            ? "fan-in from edge nodes · color = projected cluster"
-            : !settled
-              ? "drift to centroid · semantic similarity = spatial proximity"
-              : !showHalos
-                ? "settled · awaiting feature reveal"
-                : "characteristics revealed · ready to codify"}
-        </div>
-      </div>
-      <div className="syn-cluster-legend">
-        <div className="legend-head">cluster legend</div>
-        {workflow.clusters.map((c) => {
-          const cls = c.tier === "tier_1" ? "tier1" : "tier2";
-          return (
-            <div key={c.cluster_id} className={`legend-row ${cls}`}>
-              <span
-                className="dot"
-                style={{
-                  background: `rgb(${c.color[0]}, ${c.color[1]}, ${c.color[2]})`,
-                }}
-              />
-              <span className="lbl">{c.label}</span>
-              <span className="tier">{c.tier === "tier_1" ? "T1" : "T2"}</span>
-              <span className="share">{Math.round(c.share * 100)}%</span>
-            </div>
-          );
-        })}
-      </div>
-    </aside>
+      <div className="sub">{subText}</div>
+    </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Top-level page.
+// Top-level page — just the canvas, full-bleed.
 
 export function SynthesisPage({ workflow }: { workflow: Workflow }): JSX.Element {
   return (
     <div className="syn-page">
-      <RecipePanel workflow={workflow} />
       <ClusteringCanvas workflow={workflow} />
-      <MetersPanel workflow={workflow} />
     </div>
   );
 }
