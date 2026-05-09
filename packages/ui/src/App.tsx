@@ -28,8 +28,8 @@ import {
   type PipelineStage,
 } from "./data/redesign-store.js";
 import { CODIFIABLE_WORKFLOWS } from "./data/workflows.js";
-import { AuditStage } from "./redesign/AuditStage.js";
-import { Workspace } from "./redesign/Workspace.js";
+import { AuditStage, resetAuditDriver } from "./redesign/AuditStage.js";
+import { Workspace, resetWorkflowDriver } from "./redesign/Workspace.js";
 
 const PIPELINE_ORDER: PipelineStage[] = [
   "synthesis",
@@ -106,7 +106,11 @@ export function App(): JSX.Element {
       }
       if (e.key === "r" || e.key === "R") {
         e.preventDefault();
+        resetAuditDriver();
+        resetWorkflowDriver();
         resetAll();
+        // Force a remount so the audit timeline restarts cleanly.
+        window.location.reload();
         return;
       }
     };
