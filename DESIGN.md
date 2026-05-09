@@ -88,7 +88,9 @@ If Core is wobbly on Day 4, Stretch sources DO NOT get added. Better to demo 3 s
 **The compile step:**
 The compiler is a deterministic local Python/TypeScript script that reads SOP PDF + manual + incident history (via Nia retrievals) and emits a test graph JSON. The graph contains ordered step nodes, branch nodes for safety checks, and reference edges to manual/incident citations.
 
-**Tensorlake is a Stretch wrapper, not a Core dependency.** The same compiler script runs locally by default. If Tensorlake access is open by Day 3 and the team has buffer, wrap the local script in a Tensorlake sandboxed function for the prize-alignment story. If Tensorlake breaks at any point, fall back to the local version with no change to the demo flow. Make this swap a 5-minute decision, not a 5-hour debug.
+**Tensorlake is a Stretch wrapper, not a Core dependency.** The same compiler script runs locally by default. If Tensorlake access is open by Day 3 and the team has buffer, wrap the local script in a Tensorlake sandboxed function for the prize-alignment story. If Tensorlake breaks at any point, fall back to the local version with no change to the demo flow.
+
+**Tensorlake hard cut decision: 6pm Day 5 (May 7), Backend lead decides.** If the Tensorlake integration is not running end-to-end by 6pm Day 5, drop it and document the integration friction in `NIA_IMPROVEMENTS.md` (Tensorlake is also a sponsor — friction notes there are useful). After 6pm Day 5, no further Tensorlake work happens. Single decision-maker, single deadline. No drift.
 
 This resolves the apparent contradiction with Premise 3: Nia is the **knowledge layer** the compiler reads from (continuously, with citations). Tensorlake is the optional **execution sandbox** for the compiler script. Both can be true; only the Nia layer is required.
 
@@ -99,6 +101,10 @@ This resolves the apparent contradiction with Premise 3: Nia is the **knowledge 
 4. The verifier checks the current detected action against the expected node in the test graph.
 5. On deviation: Nia retrieves the violated rule (paragraph-level citation) AND the prior incident pattern. The UI flashes red, shows citation + incident, generates incident report.
 6. Convex propagates state changes to all connected clients in real time.
+
+### Run lifecycle
+
+Runs are started **manually via hotkey** by the demo operator. The hotkey creates a new `Run` in Convex with `started_by: 'manual_hotkey'`, the right `graph_id` and `detector` for the current scene, and state `AWAITING_1`. The run auto-ends when the state machine reaches `COMPLETED`, `DEVIATION` (after the citation surface fires), or 30s of `LOST_SIGNAL`. Manual is the right call for a scripted hackathon demo — auto-detect adds risk for a feature judges won't notice was missing. Auto-detect can be added post-hackathon (one of the listed "Open Questions" for v2).
 
 ### The Demo Has Two Camera Sources, Not One
 
@@ -168,21 +174,111 @@ Skip: Aside (browser action layer doesn't fit the runtime story), World Labs (co
 
 ### Tech Stack
 
-- **CV detection:** YOLOv8 finetuned on the 5 everyday objects: cardboard box, packing paper / bubble wrap, packing tape, shipping label, and the small product item (book or mug). Plan ~8 hours of labeling + training across Day 1 evening and Day 2. Use Roboflow for labeling speed. Augment with rotation/lighting variants; the venue lighting will not match the lab.
+- **CV detection:** YOLOv8**n** (nano variant — smallest weights, fast CPU inference) finetuned on the 5 everyday objects: cardboard box, packing paper / bubble wrap, packing tape, shipping label, and the small product item (book or mug). Plan ~8 hours of labeling + training across Day 1 evening and Day 2. Use Roboflow for labeling speed. Augment with rotation/lighting variants; the venue lighting will not match the lab.
+- **Inference location:** YOLO runs locally on the demo laptop. **No hosted inference.** EF venue wifi cannot be a hard demo dependency. Demo laptop runs at 1 fps, so even ~50ms-per-frame YOLOv8n CPU inference has 95% headroom.
 - **Production-footage detection:** Same YOLO model is *not* expected to generalize to real factory footage. For the production-playback segment, use Gemini 2.0 Flash directly on sampled frames — the VLM handles the variety of objects in real industrial footage well enough for "what step is this?" reasoning. The CV pipeline switches to VLM-only mode when the input source is the playback file (one config flag).
 - **VLM scene reasoner:** **Gemini 2.0 Flash** (decision: lower latency than GPT-4V, sufficient quality for scene-level "what step is this?" reasoning). Runs every 1 second on a sampled frame. Caches the last 3 scene labels to avoid flicker.
-- **Step-skip detection logic (deterministic):** A step is "skipped" when the verifier observes any state-change consistent with step N+1, N+2, etc. before step N's expected outcome is detected, with a 2-second confirmation window to avoid noise. This is a small state machine, not a vibes-based prompt.
-- **Backend:** Convex (real-time state, queries, auth, incident report storage). Schema: `runs`, `steps`, `detections`, `citations`, `incidents`, `reports`.
+
+  **Latency discipline:** YOLO is the primary detection signal; Gemini is *additive context*, never blocking. The detection pipeline waits at most 800ms for a Gemini response — beyond that, the in-flight call is discarded and the YOLO-only event is emitted. The verifier never blocks on the VLM. Latency budget: detection event from camera frame to UI render is <200ms (YOLO ~50ms + state machine ~1ms + Convex propagation ~100ms + citation lookup ~10ms + render ~16ms).
+- **Step-skip detection logic (state machine, not prose):**
+
+```
+              detection event       no detection (5s)
+                │                   │
+                ▼                   ▼
+  ┌──────────┐  start_run   ┌──────────────┐  out-of-order  ┌─────────────┐
+  │  IDLE    ├─────────────▶│  AWAITING_N  ├───────────────▶│  DEVIATION  │
+  └──────────┘              │              │  detection      └──────┬──────┘
+        ▲                   └────┬─────────┘                        │
+        │                        │                                  │ flag + cite
+        │                        │ step_N detected                  │
+        │                        ▼                                  │
+        │                   ┌──────────────┐                        │
+        │                   │ OBSERVING_N  │                        │
+        │                   │ (2s confirm) │                        │
+        │                   └────┬─────────┘                        │
+        │                        │ confirmed (no contradict)         │
+        │                        ▼                                  │
+        │                   ┌──────────────┐                        │
+        │                   │  STEP_N_DONE ├──N==final──┐           │
+        │                   └────┬─────────┘            │           │
+        │                        │ N=N+1                ▼           │
+        │                        │              ┌──────────────┐    │
+        │                        ▼              │  COMPLETED   │    │
+        │                   AWAITING_N+1        └──────┬───────┘    │
+        │                                              │            │
+        │  reset                                       │ end_run    │
+        │◀─────────────────────────────────────────────┘────────────┘
+        │
+        │  (lost signal recovery)
+        │
+   ┌────┴───────────┐  signal_returns + still in window
+   │  LOST_SIGNAL   │◀──────────────from any waiting/observing state
+   └────────────────┘
+```
+
+A step is "skipped" when in `AWAITING_N`, the detector emits an event consistent with step N+1, N+2, etc. (the "out-of-order" trigger). The 2s confirmation window inside `OBSERVING_N` avoids flickering on noisy detections. `LOST_SIGNAL` engages when no detection events arrive for 5s; if signal returns within 15s the run resumes, otherwise auto-reset to IDLE. Implementation: small TypeScript module (state machine + transition table + `currentState`, `currentStep`, `windowStart` fields), unit-tested before integration.
+- **Backend:** Convex (real-time state, queries, auth, incident report storage). Schema:
+  - `runs` — `{id, source: 'live_camera' | 'playback', graph_id, detector: 'yolo' | 'vlm_only', started_at, ended_at, state: 'IDLE' | 'AWAITING_N' | 'OBSERVING_N' | 'DEVIATION' | 'LOST_SIGNAL' | 'COMPLETED', current_step, started_by: 'manual_hotkey' | 'auto_detect'}`
+  - `graphs` — compiled test graphs `{id, sop_doc_id, nodes: [{step_n, expected_action, citation_ref}], compiled_at}`
+  - `detections` — `{run_id, frame_ts, objects, action_inferred, confidence}`
+  - `citations` — `{run_id, rule_id, source_doc, page, paragraph, text, video_clip?: {start_s, end_s, thumbnail}, image_region?: {page, bbox, caption}}`
+  - `incidents` — `{id, json_blob, ingested_at, matched_steps}` (live-monitored folder)
+  - `reports` — `{run_id, generated_at, citation_chain, recommended_training}`
+
+  **Why an explicit `runs` entity, not a config flag:** the verifier reads `Run.graph_id` to pick its test graph and `Run.detector` to pick its detection backend, instead of branching on `if source == 'playback'` in 6 places. Switching demos = create a new Run with different fields. A live-tabletop run and a playback run can co-exist without state collision (state isolated by `run_id`). Schema cost ~20 lines; saves the Day-4 firefight where one demo or the other doesn't switch cleanly.
 - **Frontend:** Next.js on Vercel. Three-pane layout (live camera left, detected objects + test graph middle, citation + incident right). Bottom: incident report.
 - **Knowledge layer:** Nia indexes 3 Core sources (with 3 Stretch deferred). Queries via Nia SDK at verification time. Citation surface returns paragraph-level provenance with source doc thumbnail.
+
+  **Nia is the primary retrieval path, NOT just basic RAG.** Concretely, Nia is exercised for:
+  - Continuous-monitor ingest of the live-incident folder (load-bearing for the wow beat)
+  - Multi-source query at verification time ("did this violation happen before?" pulls across SOP + manual + incident log + Slack notes)
+  - Cross-source citation chains (rule violated → manual section → similar prior incident)
+  - Semantic similarity matching ("this looks like incident #23") — fuzzy beats exact-string matching for the "have we seen this before?" beat
+
+  **Citation provenance fallback (Day 1 spike validates which path applies):**
+  - Day 1 morning: pre-process the Shipping SOP PDF into a structured JSON: `{sections: [{id: '2.3', page: 2, paragraph: 1, text: '...'}]}`. ~2 hours of work; counts as primary if Nia paragraph-level retrieval is weak.
+  - Day 1 afternoon: feed SOP to Nia, verify paragraph-level retrieval works for known sections.
+  - **If Nia paragraph retrieval works:** Nia is the primary citation source. The structured JSON sits silent as a fallback.
+  - **If Nia paragraph retrieval is document-level only:** verifier looks up by structured-JSON anchor for citation text/page/paragraph; Nia still owns continuous-monitor ingest, multi-source query, and incident pattern matching (its load-bearing roles). This becomes Nia Improvement Report finding #1 with a concrete proposal: "expose paragraph-level provenance in retrieval results."
+
+### Multi-modal citation anchors (the differentiator)
+
+Text quotes are table stakes. The thing that makes the citation surface *unmistakably more than RAG* is precise multi-modal anchors:
+
+- **Video clip citations:** when a procedural rule is taught in a training video, the citation surface returns `{video_id, clip_start: '1:23', clip_end: '1:45', transcript: '...', frame_thumbnail: 'path/to/frame.jpg'}`. The UI plays the 22-second clip inline next to the violation. Implementation: pre-process the training video into chunks with whisper-transcribed segments + sampled keyframes; index each chunk in Nia with `{start_s, end_s, frame_path}` metadata; surface those fields in the citation card.
+- **Photo / diagram region citations:** when an equipment manual contains diagrams (torque tables, fastener orientation diagrams, hazard pictograms), the citation surface returns `{page, bbox: [x1, y1, x2, y2], caption}`. The UI overlays the bounding box on the page screenshot. Implementation: pre-process diagrams using Gemini Vision to label regions; index each region in Nia with bbox metadata; surface those fields in the citation card.
+
+**Why this matters for the demo:** the difference between "your manual said cap goes first" (text quote) and "your manual said cap goes first AND here's the 22-second training clip teaching that step AND here's the diagram on page 4 showing the assembly order" (multi-modal evidence package) is the difference between *RAG demo* and *new primitive*.
+
+**Why this matters for the Nia Improvement Report:** Nia probably exposes some of this natively (video transcripts likely yes; bbox region anchors likely no). Whatever's missing becomes a concrete proposal: "video segment + frame metadata as first-class citation fields," "vision-region anchors with bbox metadata." We ship the version we wished Nia had, then we propose Nia ships it.
+
+Either way, Nia is doing more than RAG.
 - **Compiler:** Local TypeScript/Python script consumes Nia retrievals, emits test graph JSON. Optionally wrapped in a Tensorlake sandboxed function for the sponsor story (Stretch).
 - **Camera input:** USB webcam, 1080p, fixed mount. **Bring your own ring light + diffuser to the EF office.** Venue lighting will be different from where you trained YOLO; do not rely on it.
+
+### Network resilience — full offline-capable demo
+
+Hard rule: **EF venue wifi cannot be a hard demo dependency.** Pre-cache everything the demo needs to the laptop on Day 5. The pipeline degrades gracefully when any cloud service is unreachable.
+
+Pre-cached on demo laptop (Day 5 evening, ~3 hours of work):
+- Compiled test graph for the Shipping SOP (JSON in local file)
+- All citations the demo will encounter (text, video clips, image regions) — cached as static JSON keyed by rule_id
+- 3 incident scenarios for the live-ingest beat (pre-staged JSON files + their pre-computed Nia matches)
+- Production-line playback video file (local mp4)
+- Local Convex dev instance running on demo laptop (Convex supports local dev) as fallback if cloud Convex is unreachable
+- YOLOv8n weights file (already local — confirmed)
+- Optional: a small local VLM (Llama 3.2 Vision via Ollama) as a Gemini-Flash fallback for the playback scene reasoner
+
+Online services are still preferred (better latency, cleaner story), but the demo runs end-to-end with airplane-mode wifi. Test this on Day 6: turn wifi off and run the full demo. If anything breaks, fix it before the hackathon.
+
+Citation latency budget: <200ms from "violation detected" to "citation card rendered." Online path uses Nia retrieval. Offline path uses local JSON lookup. Both feel instant.
 
 ## Open Questions
 
 - **Team size and roles.** How many people on the team? At minimum the build needs: (1) CV/ML lead (YOLO + VLM), (2) Backend lead (Convex schema + Nia integration + compiler), (3) Frontend lead (Next.js + dashboard polish + camera UX), (4) Demo ops / pitch lead. One person can wear two hats; fewer than two people on a build this dense is risky.
 - **Everyday object set sourced.** Cardboard box, packing paper, packing tape, shipping label / sticker, and one small product (book or mug). All from a desk drawer or corner store. Confirm on hand by Day 1 evening so labeling can start.
-- **Production footage sourced.** A 30-60s clip of real factory / warehouse / pharma packaging work, Creative Commons or public stock. Sources to check: Pexels, Pixabay, YouTube factory tour B-roll (with citation), Storyblocks. Pre-process to find the timestamp where a procedural skip naturally occurs in the footage; if no natural skip exists, edit a clip to remove a step. Day 1 task.
+- **Production footage sourced (timeboxed Day 1 morning, 60 min, hard 11am cutoff).** A 30-60s clip of real factory / warehouse / pharma packaging work, Creative Commons or public stock. Sources to check: Pexels, Pixabay, YouTube factory tour B-roll (with citation), Storyblocks. Pre-process to find the timestamp where a procedural skip naturally occurs; if no natural skip exists, edit the clip to remove a step. **Fallback if no suitable clip found by 11am:** move the tabletop shipping kit to a different angle and lighting, shoot 30s of "miniature production line" footage, and use that as the playback source. The story still lands (same primitive, different scale).
 - **Tensorlake access timing.** If sponsor access is gated to event day, the local compiler is your only path; Tensorlake becomes a Day-7 swap, not a Day-3 build. Verify access status on Day 1.
 - **Nia continuous-monitor support.** Does the SDK support filesystem watching out of the box, or do you need a polling shim? If polling, document latency in the Nia Improvement Report.
 - **Pitch length.** Brief assumes ~3 minutes; confirm with hackathon organizers. 5-minute pitch = add the agent-trace closing demo; 3-minute pitch = trim the warm-up and lead with the skipped-step beat.
@@ -238,34 +334,42 @@ CI/CD: Vercel auto-deploys on main pushes. Convex deploys via `npx convex deploy
 
 **Day 2 (May 4):**
 - YOLO labeling marathon (Roboflow recommended). ~500 frames of the 5 everyday shipping objects, augmentation passes.
-- YOLOv8 finetune pass 1. Validate on test set under varied lighting.
-- Convex schema: `runs`, `steps`, `detections`, `citations`, `incidents`, `reports`, `source` (live-camera vs. playback).
+- YOLOv8n finetune pass 1. Validate on test set under varied lighting.
+- Convex schema implemented per the design (runs, graphs, detections, citations, incidents, reports).
 - First Vercel deploy with placeholder UI.
 - Nia ingest pipeline working for the 3 Core sources end-to-end.
-- Production-footage pipeline scaffolded: video plays back through OpenCV / browser, frames feed into Gemini Flash VLM, output goes to the same verifier as live camera.
+- Production-footage pipeline scaffolded: video plays back, frames feed into Gemini Flash VLM, output goes to the same Detector interface as YOLO.
+- **Vitest set up. State machine module + 11 unit tests written and passing.** This is the highest-leverage test work in the project — the FSM is the single point of failure. Unit-test before integrating.
 
 **Day 3 (May 5):**
 - SOP→test-graph compiler implemented (local script). Test graph generation working from real SOP PDF.
 - Gemini 2.0 Flash scene reasoner integrated. Latency profiled — confirm <1.5s per call.
-- Step-skip detection state machine implemented. Unit-tested with synthetic event streams.
+- Citation resolver implemented (Nia primary, structured-JSON fallback). 5 unit tests with mocked Nia.
+- SOP compiler tests (4 unit + 1 integration).
 - Live verification loop end-to-end: camera → YOLO + Gemini → state machine → graph node update → Nia citation retrieval.
 - First end-to-end dry run (no judging, just see if it works).
 
 **Day 4 (May 6):**
 - Convex real-time dashboard polish. Three-pane layout finalized.
-- Citation surface: paragraph-level Nia retrieval + source doc thumbnail.
+- Citation surface: paragraph-level Nia retrieval + multi-modal anchors (video clip + image region) + source doc thumbnail.
 - Live-ingest beat hardened: pre-staged JSON file, hotkey macro, cached embeddings, hidden hotkey fallback (direct Convex mutation).
+- Live ingest watcher integration tests (2 tests).
+- Playwright set up. Critical paths #1 (live tabletop happy) and #2 (skipped step beat) recorded as E2E specs.
 - First *intentional rehearsal* (timed, in front of one teammate playing judge).
-- **Cut decision:** if Core works, start Stretch (training video transcript). If Core is wobbly, freeze scope and polish.
+- **Cut decision:** if Core works, start Stretch (training video transcript with multi-modal citation). If Core is wobbly, freeze scope and polish.
 
 **Day 5 (May 7):**
 - Demo polish. Ring light setup. Camera mount. Recording station.
+- Critical paths #3, #4, #5 recorded as Playwright E2E.
+- Eval suite for Gemini Flash (10 known frames → expected step labels).
+- **Network-resilience caching pass (~3 hours):** pre-cache compiled graph, all citations, 3 incident scenarios, playback video, local Convex dev fallback, optional local VLM. Goal: full demo runs offline.
 - Backup video recorded by demo ops lead. Hidden hotkey tested 5+ times.
-- Tensorlake integration if access is open AND Core is rock-solid (10-minute swap, not a 10-hour debug).
+- **Tensorlake hard cut decision at 6pm:** if integration not running end-to-end, drop and document in `NIA_IMPROVEMENTS.md`.
 - `NIA_IMPROVEMENTS.md` polished: 3-5 specific friction points with concrete proposals.
 - Second timed rehearsal. Time the pitch end-to-end.
 
 **Day 6 (May 8 — day before hackathon):**
+- **Network-off rehearsal:** turn off wifi, run the full demo. Anything that breaks gets fixed before bed. This is the Day 6 acceptance test.
 - Final rehearsal in lighting conditions as close to EF venue as possible.
 - Pitch deck (3-5 slides max). Talking points memorized by pitch lead.
 - Pack: laptop, camera, mount, ring light, diffuser, USB cables, power strip, kit pieces, backup laptop if available.
