@@ -16,7 +16,7 @@ export interface INiaClient {
   /** Three-state lookup keyed by cluster signature (semantic centroid). */
   vaultLookup(cluster_signature: string): Promise<VaultLookupResult>;
 
-  /** Vault write API — used live during demo and operation. */
+  /** Vault write API - used live during demo and operation. */
   vaultWrite(entry: VaultEntry): Promise<{ vault_page_id: string }>;
 
   /** Replaces a custom embedding store; powers cluster centroids. */
@@ -25,7 +25,7 @@ export interface INiaClient {
     top_k?: number;
   }): Promise<Array<{ id: string; score: number; text: string }>>;
 
-  /** Document Agent grounding — used inside synthesis specs. */
+  /** Document Agent grounding - used inside synthesis specs. */
   fetchDocs(doc_ids: string[]): Promise<
     Array<{ nia_doc_id: string; title: string; excerpt: string }>
   >;
@@ -111,7 +111,7 @@ export class StubNiaClient implements INiaClient {
 
 /**
  * Library of seed payload generators keyed by the function the call site
- * lives in. Hackathon-grade — covers the Acme demo functions.
+ * lives in. Hackathon-grade - covers the Acme demo functions.
  */
 function defaultSeedPayloadFor(
   cs: CallSiteDescriptor,
@@ -158,6 +158,100 @@ function defaultSeedPayloadFor(
         product: `Widget v${i % 5}`,
         audience: industries[i % industries.length]!,
         tone: tones[i % tones.length]!,
+      };
+    /* ── Folk demo ─────────────────────────────────────────────────── */
+    case "classify_message_intent": {
+      const samples = [
+        "hey can you grab dinner tomorrow night?",
+        "running late, sorry - be there in 20",
+        "yo wassup",
+        "did you see the slides?",
+        "love you",
+        "can someone fix the staging deploy?",
+        "FREE iPhone - click here",
+        "what time were we meeting again",
+      ];
+      return { text: samples[i % samples.length]! };
+    }
+    case "score_message_urgency": {
+      const samples = [
+        ["mom", "call me when you can"],
+        ["alex", "URGENT - server down"],
+        ["sarah", "wanna grab coffee sometime?"],
+        ["boss", "need this by EOD"],
+        ["friend", "happy birthday!!"],
+      ];
+      const s = samples[i % samples.length]!;
+      return { text: s[1]!, sender: s[0]! };
+    }
+    case "extract_event_from_message": {
+      const samples = [
+        "let's do dinner Thursday at 7",
+        "my flight lands at SFO at 11pm",
+        "deadline for the proposal is Friday",
+        "booked the restaurant for tomorrow at 8",
+        "no plans this weekend, free if you're around",
+      ];
+      return { text: samples[i % samples.length]! };
+    }
+    case "apply_user_writing_style":
+      return {
+        draft: `Hello, I am unable to attend the meeting this afternoon. I cannot make it.`,
+        style_excerpts: ["yo cant make it sorry", "running late lmk"],
+      };
+    case "draft_reply_in_user_voice":
+      return {
+        inbound: `wanna get dinner tonight?`,
+        history: ["yeah totally", "next week works better"],
+        persona: "Arlan - founder, busy, terse, lowercase",
+        context: `recent contact, last reply 2h ago`,
+      };
+    case "score_relationship_warmth": {
+      const ids = ["mom", "alex_co_founder", "sarah_friend", "client_acme", "old_school"];
+      return {
+        contact_id: ids[i % ids.length]!,
+        recent_thread: [
+          `${ids[i % ids.length]}: hey how's it going`,
+          `me: good, busy`,
+          `${ids[i % ids.length]}: same`,
+        ],
+        total_msgs_30d: 5 + ((i * 7) % 250),
+      };
+    }
+    case "summarize_thread_for_memory":
+      return {
+        thread: [
+          `customer: figured out the bug`,
+          `me: nice, what was it`,
+          `customer: race condition in the writer`,
+          `me: classic, ship it`,
+        ],
+      };
+    case "retrieve_relevant_memory":
+      return {
+        query: `last time I talked to alex about funding`,
+        candidate_memories: [
+          `2026-04: alex mentioned series A close`,
+          `2026-03: alex flew to NYC for meetings`,
+          `2026-02: alex shipped v2 launch`,
+        ],
+      };
+    case "infer_relationship_context":
+      return {
+        contact_id: `alex_co_founder`,
+        vault_excerpts: [
+          `co-founder, met 2024, daily contact`,
+          `last topic: hiring`,
+          `tone: collaborative, direct`,
+        ],
+      };
+    case "summarize_recent_messages":
+      return {
+        messages: [
+          { from: `mom`, body: `call me when you have time` },
+          { from: `alex`, body: `staging is deploying again` },
+          { from: `sarah`, body: `dinner thursday?` },
+        ],
       };
     default:
       return { payload: `seed_${i}` };

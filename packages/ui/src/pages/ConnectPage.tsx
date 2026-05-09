@@ -6,7 +6,7 @@ const HANDSHAKE_LINES = [
   { delay: 120, text: "→ resolving npm @compile/mcp@0.1.0..." },
   { delay: 220, text: "→ MCP handshake · jsonrpc/2.0 · stdio" },
   { delay: 280, text: "→ tools registered · scan_repo · synthetic_confirm · request_synthesis · submit_synthesis · run_codified · find_function · estimate_savings · observe_call · list_codify_candidates" },
-  { delay: 240, text: "✓ compile · acme/agent · 9 tools · ready · 142ms" },
+  { delay: 240, text: "✓ compile · folk/agent · 9 tools · ready · 142ms" },
 ];
 
 export function ConnectPage(): JSX.Element {

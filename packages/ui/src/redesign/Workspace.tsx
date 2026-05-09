@@ -33,6 +33,7 @@ import {
 import { SynthesisPage } from "./pages/SynthesisPage.js";
 import { CodificationPage } from "./pages/CodificationPage.js";
 import { ProductionPage } from "./pages/ProductionPage.js";
+import { FolkTextDemo } from "./FolkTextDemo.js";
 
 const PIPELINE_STAGES: { id: PipelineStage; label: string; sub: string }[] = [
   { id: "synthesis", label: "synthesize", sub: "1,000 grounded inputs · cluster" },
@@ -400,6 +401,7 @@ export function Workspace(): JSX.Element {
         ) : null}
         {stage === "production" ? <ProductionPage workflow={workflow} /> : null}
       </div>
+      <FolkTextDemo />
     </div>
   );
 }

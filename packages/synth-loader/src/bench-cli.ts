@@ -24,7 +24,7 @@ import { runStage2 } from "./grid.js";
 import { CaptureBootstrapStream, writeReplayFile } from "./replay-capture.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_ACME = resolve(__dirname, "../../../data/acme-agent");
+const DEFAULT_REPO = resolve(__dirname, "../../../data/folk-agent");
 const DEFAULT_OUT = resolve(__dirname, "../../../data/bench/golden.json");
 
 interface BenchConfig {
@@ -44,8 +44,8 @@ function readConfig(): BenchConfig {
     worker_count: parseInt(process.env.COMPILE_BENCH_WORKERS ?? "64", 10),
     budget_ms: parseInt(process.env.COMPILE_BENCH_BUDGET_MS ?? "30000", 10),
     target_function:
-      process.env.COMPILE_BENCH_TARGET ?? "classify_ticket_priority",
-    acme_path: process.env.COMPILE_BENCH_REPO ?? DEFAULT_ACME,
+      process.env.COMPILE_BENCH_TARGET ?? "classify_message_intent",
+    acme_path: process.env.COMPILE_BENCH_REPO ?? DEFAULT_REPO,
     out_path: process.env.COMPILE_BENCH_OUT ?? DEFAULT_OUT,
   };
 }

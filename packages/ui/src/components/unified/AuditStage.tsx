@@ -140,7 +140,7 @@ export function AuditStage(): JSX.Element {
             <span style={{ background: "#ffd166" }} />
             <span style={{ background: "#5afca7" }} />
           </span>
-          <span className="title">tensorlake sandbox · acme/agent · ast walker</span>
+          <span className="title">tensorlake sandbox · folk/agent · ast walker</span>
           <span className="status">
             <span className="dot" />
             scanning

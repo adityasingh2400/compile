@@ -5,7 +5,7 @@
  * Run with: `npm run demo:dry-run` (loads .env.local).
  *
  * What it exercises (in demo order):
- *   1. compile.scan_repo           — Lane E scanner against data/acme-agent
+ *   1. compile.scan_repo           — Lane E scanner against data/folk-agent
  *   2. compile.synthetic_confirm   — Stage-2 fan-out (downscaled to 500
  *                                    calls so this finishes in ~2s)
  *   3. compile.list_codify_candidates
@@ -50,7 +50,7 @@ import type {
 } from "@compile/schemas";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ACME = resolve(__dirname, "../../../data/acme-agent");
+const FOLK = resolve(__dirname, "../../../data/folk-agent");
 
 interface BeatResult {
   name: string;
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   console.log("▶ Beat 1 — scan_repo (Lane E scanner against Acme)");
   const report = (await beat(
     "scan_repo",
-    () => h["compile.scan_repo"]({ repo_path: ACME }) as Promise<ScanReport>,
+    () => h["compile.scan_repo"]({ repo_path: FOLK }) as Promise<ScanReport>,
     (r) =>
       `${r.call_sites.length} sites, pills=${["green", "yellow", "red"]
         .map((p) => `${p}:${r.call_sites.filter((c) => c.priors.pill === p).length}`)

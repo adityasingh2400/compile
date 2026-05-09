@@ -5,11 +5,11 @@ import { StubNiaClient } from "@compile/nia";
 import { runStage2 } from "../src/grid.js";
 import type { SyntheticCell } from "@compile/schemas";
 
-const ACME = resolve(__dirname, "../../../data/acme-agent");
+const FOLK = resolve(__dirname, "../../../data/folk-agent");
 
 describe("synth-loader Stage 2", () => {
   it("runs a downscaled (1k) grid against a GREEN call site and produces axis scores", async () => {
-    const scan = await scanRepo(ACME);
+    const scan = await scanRepo(FOLK);
     const green = scan.call_sites.find((c) => c.priors.pill === "green");
     expect(green).toBeDefined();
 
@@ -51,7 +51,7 @@ describe("synth-loader Stage 2", () => {
   }, 30000);
 
   it("RED call site lands in tier_3 and does not pass the synthesis gate", async () => {
-    const scan = await scanRepo(ACME);
+    const scan = await scanRepo(FOLK);
     const red = scan.call_sites.find((c) => c.priors.pill === "red");
     expect(red).toBeDefined();
 

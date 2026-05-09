@@ -204,7 +204,7 @@ export const DEMO_CALL_SITES: CallSiteDescriptor[] = [
 
 export const DEMO_SCAN_REPORT: ScanReport = {
   scanned_at: new Date().toISOString(),
-  repo_path: "data/acme-agent",
+  repo_path: "data/folk-agent",
   files_scanned: DEMO_FILES.length,
   call_sites: DEMO_CALL_SITES,
   tree_signature: "a3f2d1bdemo",

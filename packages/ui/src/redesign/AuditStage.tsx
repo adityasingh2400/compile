@@ -26,7 +26,7 @@ import {
   AUDIT_CALL_SITES,
   CODIFIABLE_WORKFLOWS,
   REPO_PATH,
-  type AuditCallSite,
+  type Workflow,
 } from "../data/workflows.js";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -246,7 +246,7 @@ function SandboxParticles(): JSX.Element {
       last = now;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
-      ctx.fillStyle = "rgba(5, 6, 8, 0.55)";
+      ctx.fillStyle = "rgba(255, 247, 240, 0.55)";
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = "rgba(122, 223, 255, 0.55)";
       for (let i = 0; i < N; i++) {
@@ -370,123 +370,215 @@ function BootTerminal(): JSX.Element {
   );
 }
 
-function ScanColumn(): JSX.Element {
-  const filesScanned = useRedesignStore((s) => s.audit.files_scanned);
-  const tokens = useRedesignStore((s) => s.audit.ast_tokens_seen);
-  const phase = useRedesignStore((s) => s.audit.phase);
-  const active =
-    phase === "scanning" || phase === "classifying" || phase === "filtering" ||
-    phase === "manifest";
+function formatMoney(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
+  return `$${Math.round(n).toLocaleString()}`;
+}
+
+function inferBehaviorTags(wf: Workflow): string[] {
+  const tags: string[] = [];
+  // Prompt is short / templated → static prompt
+  if (wf.prompt_excerpt.length < 160) tags.push("static prompt");
+  // Has structured input shape → schema-bounded
+  if (wf.input_fields.length > 0) tags.push("typed input shape");
+  // Most workflows here use temp 0 / structured output
+  tags.push("temperature 0");
+  tags.push("structured output");
+  return tags;
+}
+
+function annualSpend(wf: Workflow): number {
+  return wf.monthly_calls * wf.per_call_cost_usd * 12;
+}
+
+/**
+ * Single-card description for one identified production workflow.
+ * Streams in as the audit progresses through `classifying` → `manifest`.
+ */
+function WorkflowIdentifiedCard({
+  workflow,
+  index,
+}: {
+  workflow: Workflow;
+  index: number;
+}): JSX.Element {
+  const tags = inferBehaviorTags(workflow);
+  const yearly = annualSpend(workflow);
+  const inputSummary = workflow.input_fields
+    .map((f) => f.name)
+    .slice(0, 6)
+    .join(", ");
+  const accentRgb = workflow.tier === "tier_2" ? "255, 179, 90" : "90, 252, 167";
+
   return (
-    <div className={`audit-scan ${active ? "active" : ""}`}>
-      <div className="audit-card-head">
-        <span className="num">02</span>
-        <span className="title">scan · ast</span>
-        <span className="hint">ts-morph + tree-sitter</span>
-        {phase === "scanning" ? <span className="audit-pulse" /> : null}
-      </div>
-      <div className="audit-scan-files">
-        {SCAN_FILES.map((path, i) => {
-          const isLit = i === filesScanned - 1 && phase === "scanning";
-          const isDone = i < filesScanned;
-          return (
-            <div
-              key={path}
-              className={`audit-scan-file ${isLit ? "lit" : ""} ${isDone ? "done" : ""}`}
-            >
-              <span className="dot" />
-              <span className="path">{path}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="audit-scan-meters">
-        <div className="meter">
-          <div className="big">{filesScanned}</div>
-          <div className="lbl">files scanned</div>
+    <article
+      className={`audit-wf-card ${workflow.tier}`}
+      style={{
+        animationDelay: `${index * 110}ms`,
+        ["--accent" as never]: accentRgb,
+      }}
+    >
+      <header className="audit-wf-card-head">
+        <span className="audit-wf-idx">
+          {(index + 1).toString().padStart(2, "0")}
+        </span>
+        <div className="audit-wf-title-block">
+          <h3 className="audit-wf-fn">{workflow.function_name}</h3>
+          <div className="audit-wf-loc">
+            <span>{workflow.file_path}</span>
+            <span className="sep">·</span>
+            <span>{workflow.provider}</span>
+          </div>
         </div>
-        <div className="meter">
-          <div className="big">{tokens.toLocaleString()}</div>
-          <div className="lbl">ast tokens</div>
+        <div className="audit-wf-traffic">
+          <div className="audit-wf-traffic-num">
+            {(workflow.monthly_calls / 1000).toFixed(0)}
+            <span className="unit">k</span>
+          </div>
+          <div className="audit-wf-traffic-lbl">calls / month</div>
         </div>
-        <div className="meter">
-          <div className="big">{phase === "boot" ? "—" : "10"}</div>
-          <div className="lbl">llm call sites</div>
+      </header>
+
+      <p className="audit-wf-desc">{workflow.description}</p>
+
+      <div className="audit-wf-prompt">
+        <span className="audit-wf-prompt-q">"</span>
+        {workflow.prompt_excerpt}
+        <span className="audit-wf-prompt-q">"</span>
+      </div>
+
+      <div className="audit-wf-stats">
+        <div className="audit-wf-stat">
+          <div className="audit-wf-stat-val">
+            {workflow.input_fields.length}
+            <span className="audit-wf-stat-sub">
+              {" "}
+              {workflow.input_fields.length === 1 ? "field" : "fields"}
+            </span>
+          </div>
+          <div className="audit-wf-stat-lbl">input shape</div>
+          <div className="audit-wf-stat-detail">{inputSummary}</div>
+        </div>
+        <div className="audit-wf-stat">
+          <div className="audit-wf-stat-val">
+            ${workflow.per_call_cost_usd.toFixed(3)}
+          </div>
+          <div className="audit-wf-stat-lbl">per call</div>
+          <div className="audit-wf-stat-detail">{workflow.provider} list price</div>
+        </div>
+        <div className="audit-wf-stat">
+          <div className="audit-wf-stat-val">{formatMoney(yearly)}</div>
+          <div className="audit-wf-stat-lbl">annual spend</div>
+          <div className="audit-wf-stat-detail">at current traffic</div>
         </div>
       </div>
-    </div>
+
+      <div className="audit-wf-tags">
+        {tags.map((t) => (
+          <span key={t} className="audit-wf-tag">
+            {t}
+          </span>
+        ))}
+      </div>
+    </article>
   );
 }
 
-function pillCls(outcome: AuditCallSite["outcome"]): string {
-  if (outcome === "tier_1") return "tier1";
-  if (outcome === "tier_2") return "tier2";
-  return "neg";
-}
-
-function ClassifyColumn(): JSX.Element {
+function WorkflowsPanel(): JSX.Element {
   const classified = useRedesignStore((s) => s.audit.classified);
   const phase = useRedesignStore((s) => s.audit.phase);
-  const filtered = useRedesignStore((s) => s.audit.filtered);
-  const active = phase === "classifying" || phase === "filtering" ||
-    phase === "manifest";
-  const t1 = classified.filter((c) => c.outcome === "tier_1").length;
-  const t2 = classified.filter((c) => c.outcome === "tier_2").length;
-  const neg = classified.filter((c) => c.outcome === "negative").length;
+  const filesScanned = useRedesignStore((s) => s.audit.files_scanned);
+  const tokens = useRedesignStore((s) => s.audit.ast_tokens_seen);
+
+  // Derive identified workflows from the classified stream — only
+  // tier_1 / tier_2 entries become rich cards. Negatives are silently
+  // dropped from this surface (we no longer show the rejection list).
+  const identifiedWorkflows = useMemo<Workflow[]>(() => {
+    const ids = new Set<string>();
+    const out: Workflow[] = [];
+    for (const site of classified) {
+      if (site.outcome === "negative") continue;
+      const id = site.workflow_id;
+      if (!id || ids.has(id)) continue;
+      const wf = CODIFIABLE_WORKFLOWS.find((w) => w.id === id);
+      if (wf) {
+        ids.add(id);
+        out.push(wf);
+      }
+    }
+    return out;
+  }, [classified]);
+
+  const totalSpend = useMemo(
+    () =>
+      identifiedWorkflows.reduce((acc, w) => acc + annualSpend(w), 0),
+    [identifiedWorkflows],
+  );
+  const totalCalls = useMemo(
+    () => identifiedWorkflows.reduce((acc, w) => acc + w.monthly_calls, 0),
+    [identifiedWorkflows],
+  );
+
+  const headline = (() => {
+    if (phase === "boot") return "spinning up sandbox…";
+    if (phase === "scanning") return "scanning repository";
+    if (phase === "classifying") return "identifying production workflows";
+    if (phase === "filtering") return "scoring candidates";
+    return "production workflows identified";
+  })();
+
+  const showEmpty =
+    identifiedWorkflows.length === 0 &&
+    (phase === "boot" || phase === "scanning");
+
   return (
-    <div className={`audit-classify ${active ? "active" : ""}`}>
-      <div className="audit-card-head">
-        <span className="num">03</span>
-        <span className="title">classify · tier verdict</span>
-        <span className="hint">priors from code structure</span>
-        {phase === "classifying" ? <span className="audit-pulse" /> : null}
+    <section className="audit-workflows-panel">
+      <header className="audit-wf-panel-head">
+        <div className="audit-wf-panel-eyebrow">
+          <span className="dot" />
+          {headline}
+        </div>
+        <div className="audit-wf-panel-meters">
+          <div className="meter">
+            <span className="big">{filesScanned}</span>
+            <span className="lbl">files</span>
+          </div>
+          <div className="meter">
+            <span className="big">{tokens.toLocaleString()}</span>
+            <span className="lbl">ast tokens</span>
+          </div>
+          <div className="meter">
+            <span className="big">
+              {identifiedWorkflows.length}
+              <span className="dim"> / {CODIFIABLE_WORKFLOWS.length}</span>
+            </span>
+            <span className="lbl">workflows</span>
+          </div>
+          <div className="meter accent">
+            <span className="big">{formatMoney(totalSpend)}</span>
+            <span className="lbl">annual spend</span>
+          </div>
+          <div className="meter">
+            <span className="big">{(totalCalls / 1000).toFixed(0)}k</span>
+            <span className="lbl">calls/mo</span>
+          </div>
+        </div>
+      </header>
+
+      <div className="audit-wf-list">
+        {showEmpty ? (
+          <div className="audit-wf-empty">
+            <span className="audit-wf-empty-pulse" />
+            <span>walking AST · resolving call graph · matching providers</span>
+          </div>
+        ) : null}
+
+        {identifiedWorkflows.map((wf, i) => (
+          <WorkflowIdentifiedCard key={wf.id} workflow={wf} index={i} />
+        ))}
       </div>
-      <div className="audit-classify-list">
-        {classified.map((site, i) => {
-          const cls = pillCls(site.outcome);
-          const dim = filtered && site.outcome === "negative";
-          const promoted = filtered && site.outcome !== "negative";
-          return (
-            <div
-              key={site.call_site_id}
-              className={`audit-classify-row ${cls} ${dim ? "dim" : ""} ${promoted ? "promoted" : ""}`}
-              style={{
-                transitionDelay: `${i * 28}ms`,
-              }}
-            >
-              <span className={`tier-pill ${cls}`}>
-                {site.outcome === "tier_1"
-                  ? "T1"
-                  : site.outcome === "tier_2"
-                    ? "T2"
-                    : "—"}
-              </span>
-              <span className="fn">{site.function_hint}</span>
-              <span className="path">
-                {site.file_path}:{site.line}
-              </span>
-              <span className="reason">{site.reason}</span>
-              <span className="vol">
-                {site.monthly_calls.toLocaleString()}/mo
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="audit-classify-foot">
-        <span className="bucket t1">
-          T1 <b>{t1}</b>
-        </span>
-        <span className="sep">·</span>
-        <span className="bucket t2">
-          T2 <b>{t2}</b>
-        </span>
-        <span className="sep">·</span>
-        <span className="bucket neg">
-          negative <b>{neg}</b>
-        </span>
-      </div>
-    </div>
+    </section>
   );
 }
 
@@ -532,15 +624,17 @@ function ManifestOverlay(): JSX.Element | null {
           <span className="lbl">left in negative vault</span>
         </div>
       </div>
-      <div className="audit-manifest-pills">
+      <div className="audit-manifest-list">
         {codifiable.map((w, i) => (
           <div
             key={w.id}
-            className={`audit-manifest-pill ${w.tier}`}
+            className="audit-manifest-row"
             style={{ animationDelay: `${i * 140}ms` }}
           >
-            <span className="tier-tag">{w.tier === "tier_1" ? "T1" : "T2"}</span>
-            <span className="fn">{w.display_name}</span>
+            <span className="fn">{w.function_name}</span>
+            <span className="dim">·</span>
+            <span className="path">{w.file_path}</span>
+            <span className="dim">·</span>
             <span className="vol">
               {(w.monthly_calls / 1000).toFixed(0)}k/mo
             </span>
@@ -604,8 +698,7 @@ export function AuditStage(): JSX.Element {
         </div>
         <div className="audit-grid">
           <BootTerminal />
-          <ScanColumn />
-          <ClassifyColumn />
+          <WorkflowsPanel />
         </div>
         <PhaseIndicator />
         <ManifestOverlay />
@@ -656,9 +749,7 @@ function AuditLiveStats(): JSX.Element {
   const phase = useRedesignStore((s) => s.audit.phase);
   const filesScanned = useRedesignStore((s) => s.audit.files_scanned);
   const classified = useRedesignStore((s) => s.audit.classified);
-  const t1 = classified.filter((c) => c.outcome === "tier_1").length;
-  const t2 = classified.filter((c) => c.outcome === "tier_2").length;
-  const neg = classified.filter((c) => c.outcome === "negative").length;
+  const identified = classified.filter((c) => c.outcome !== "negative").length;
   return (
     <div className="audit-live-stats">
       <div className="stat">
@@ -667,23 +758,8 @@ function AuditLiveStats(): JSX.Element {
       </div>
       <span className="sep">·</span>
       <div className="stat">
-        <span className="big">{classified.length}</span>
-        <span className="lbl">sites</span>
-      </div>
-      <span className="sep">·</span>
-      <div className="stat green">
-        <span className="big">{t1}</span>
-        <span className="lbl">T1</span>
-      </div>
-      <span className="sep">·</span>
-      <div className="stat amber">
-        <span className="big">{t2}</span>
-        <span className="lbl">T2</span>
-      </div>
-      <span className="sep">·</span>
-      <div className="stat red">
-        <span className="big">{neg}</span>
-        <span className="lbl">neg</span>
+        <span className="big">{identified}</span>
+        <span className="lbl">workflows</span>
       </div>
       <span className="sep">·</span>
       <span className={`audit-stage-tag ${phase}`}>{phase}</span>

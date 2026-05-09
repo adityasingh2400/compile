@@ -13,7 +13,7 @@ import {
 import { MemoryRequestStore } from "../src/store.js";
 import { buildHandlers, MemoryBootstrapStore } from "../src/handlers.js";
 
-const ACME = resolve(__dirname, "../../../data/acme-agent");
+const FOLK = resolve(__dirname, "../../../data/folk-agent");
 
 describe("MCP handlers + IBootstrapStream wiring", () => {
   let nia: StubNiaClient;
@@ -35,14 +35,14 @@ describe("MCP handlers + IBootstrapStream wiring", () => {
   });
 
   it("scan_repo advances connect → reading_code → classify and emits scan", async () => {
-    await h["compile.scan_repo"]({ repo_path: ACME });
+    await h["compile.scan_repo"]({ repo_path: FOLK });
     const phases = stream.phaseOrderFor(bootstrap.getRunId()!);
     expect(phases).toEqual(["connect", "reading_code", "classify"]);
     expect(stream.eventsOf("scan")).toHaveLength(1);
   });
 
   it("scan_repo emits a vault event for every RED call site (D8 low_static_prior)", async () => {
-    const report = (await h["compile.scan_repo"]({ repo_path: ACME })) as ScanReport;
+    const report = (await h["compile.scan_repo"]({ repo_path: FOLK })) as ScanReport;
     const reds = report.call_sites.filter((c) => c.priors.pill === "red");
     const vaultEvents = stream.eventsOf("vault");
     expect(vaultEvents).toHaveLength(reds.length);
@@ -58,7 +58,7 @@ describe("MCP handlers + IBootstrapStream wiring", () => {
   });
 
   it("synthetic_confirm advances reading_docs → expanding → stress_test → clusters_revealed and streams cells + run_complete", async () => {
-    const report = (await h["compile.scan_repo"]({ repo_path: ACME })) as ScanReport;
+    const report = (await h["compile.scan_repo"]({ repo_path: FOLK })) as ScanReport;
     const green = report.call_sites.find((c) => c.priors.pill === "green")!;
 
     await h["compile.synthetic_confirm"]({
@@ -109,7 +109,7 @@ describe("MCP handlers + IBootstrapStream wiring", () => {
   });
 
   it("request_synthesis advances to agent_writing and emits spec_returned", async () => {
-    const report = (await h["compile.scan_repo"]({ repo_path: ACME })) as ScanReport;
+    const report = (await h["compile.scan_repo"]({ repo_path: FOLK })) as ScanReport;
     const green = report.call_sites.find((c) => c.priors.pill === "green")!;
     await h["compile.synthetic_confirm"]({
       call_site_id: green.call_site_id,
@@ -131,9 +131,9 @@ describe("MCP handlers + IBootstrapStream wiring", () => {
   });
 
   it("submit_synthesis (passing) advances validate → vault_write and emits the full lifecycle", async () => {
-    const report = (await h["compile.scan_repo"]({ repo_path: ACME })) as ScanReport;
+    const report = (await h["compile.scan_repo"]({ repo_path: FOLK })) as ScanReport;
     const green = report.call_sites.find(
-      (c) => c.priors.pill === "green" && c.function_hint === "classify_ticket_priority",
+      (c) => c.priors.pill === "green" && c.function_hint === "classify_message_intent",
     )!;
     await h["compile.synthetic_confirm"]({
       call_site_id: green.call_site_id,
@@ -145,22 +145,30 @@ describe("MCP handlers + IBootstrapStream wiring", () => {
     const spec = (await h["compile.request_synthesis"]({ cluster_id })) as {
       request_id: string;
     };
-    // Envelope mirrors the candidate-path stub for classify_ticket_priority
+    // Envelope mirrors the candidate-path stub for classify_message_intent
     // — copied from v7-bootstrap.test.ts where it's the canonical passing
     // case for the holdout gate.
     const envelope: SynthesisSuccess = {
       synthesizable: true,
       tier: "tier_1",
       confidence: 0.95,
-      function_name: "classify_ticket",
-      description: "Classify ticket priority + category from text",
+      function_name: "classify_intent",
+      description: "Classify inbound message intent from text",
       code: `
         import { llmFallback } from "./_runtime";
-        export function classify_ticket(input: { text: string }) {
+        export function classify_intent(input: { text: string }) {
           const t = String(input?.text ?? "");
-          const priority = /down|outage|P0/.test(t) ? "P0" : /P1|urgent/.test(t) ? "P1" : "P2";
-          const category = /billing/.test(t) ? "billing" : /auth|login/.test(t) ? "auth" : "outage";
-          return { priority, category, confidence: 0.9 };
+          const isQ = /\\?$|\\bcan you\\b|\\bwhat\\b|\\bhow\\b|\\bwhen\\b/i.test(t);
+          const isLog = /\\b(meeting|call|dinner|lunch|coffee|tomorrow|tonight|book|flight|deadline)\\b/i.test(t);
+          const isEmo = /\\b(love|miss|sorry|hate|hurt|happy|excited|birthday)\\b/i.test(t);
+          const isGreet = /^\\s*(hey|hi|hello|yo|sup|wassup)\\b/i.test(t) && t.length < 20;
+          const isSpam = /\\b(buy|sale|free|click|http|claim)\\b/i.test(t);
+          const intent = isSpam ? "spam" : isGreet ? "greeting" : isLog ? "logistics" : isEmo ? "emotional" : isQ ? "question" : "task";
+          return {
+            intent,
+            requires_reply: intent !== "spam" && intent !== "greeting",
+            confidence: 0.91,
+          };
         }
       `,
       tests: "",
@@ -171,8 +179,8 @@ describe("MCP handlers + IBootstrapStream wiring", () => {
         doc_dependencies: [],
       },
       fallback_strategy: "frontier_llm",
-      estimated_savings_per_call_usd: 0.04,
-      reasoning: "deterministic regex classifier",
+      estimated_savings_per_call_usd: 0.0019,
+      reasoning: "deterministic regex classifier mirroring stub oracle",
     };
     const result = (await h["compile.submit_synthesis"]({
       request_id: spec.request_id,

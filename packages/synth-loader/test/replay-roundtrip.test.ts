@@ -18,16 +18,16 @@ import {
 } from "../src/replay-capture.js";
 import { replayRun } from "../src/replay-player.js";
 
-const ACME = resolve(__dirname, "../../../data/acme-agent");
+const FOLK = resolve(__dirname, "../../../data/folk-agent");
 
 describe("CaptureBootstrapStream", () => {
   it("forwards every event to the downstream stream and records timed copies", async () => {
     const downstream = new MemoryBootstrapStream();
     const capture = new CaptureBootstrapStream(downstream);
 
-    const scan = await scanRepo(ACME);
+    const scan = await scanRepo(FOLK);
     const green = scan.call_sites.find(
-      (c) => c.priors.pill === "green" && c.function_hint === "classify_ticket_priority",
+      (c) => c.priors.pill === "green" && c.function_hint === "classify_message_intent",
     )!;
 
     const run = await runStage2({
@@ -50,9 +50,9 @@ describe("CaptureBootstrapStream", () => {
 
   it("serialize() returns a schema-valid ReplayFile", async () => {
     const capture = new CaptureBootstrapStream(new NoopBootstrapStream());
-    const scan = await scanRepo(ACME);
+    const scan = await scanRepo(FOLK);
     const green = scan.call_sites.find(
-      (c) => c.priors.pill === "green" && c.function_hint === "classify_ticket_priority",
+      (c) => c.priors.pill === "green" && c.function_hint === "classify_message_intent",
     )!;
     await runStage2({
       call_site: green,
@@ -181,9 +181,9 @@ describe("computeClusterLayout", () => {
 describe("replayRun (player drives an arbitrary IBootstrapStream)", () => {
   async function captureSmallRun(): Promise<ReturnType<CaptureBootstrapStream["serialize"]>> {
     const capture = new CaptureBootstrapStream(new NoopBootstrapStream());
-    const scan = await scanRepo(ACME);
+    const scan = await scanRepo(FOLK);
     const green = scan.call_sites.find(
-      (c) => c.priors.pill === "green" && c.function_hint === "classify_ticket_priority",
+      (c) => c.priors.pill === "green" && c.function_hint === "classify_message_intent",
     )!;
     await runStage2({
       call_site: green,

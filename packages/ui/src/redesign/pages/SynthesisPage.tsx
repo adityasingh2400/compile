@@ -162,7 +162,8 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
 
-      ctx.fillStyle = "rgba(5, 6, 8, 0.18)";
+      // Cream trail-fade — leaves a subtle ghost behind moving nodes.
+      ctx.fillStyle = "rgba(255, 247, 240, 0.22)";
       ctx.fillRect(0, 0, w, h);
 
       const cx = w / 2;
@@ -183,39 +184,41 @@ function ClusteringCanvas({ workflow }: CanvasProps): JSX.Element {
         }
       }
 
-      ctx.globalCompositeOperation = "lighter";
+      // Standard alpha compositing on the cream canvas — additive
+      // would wash out against the light backdrop.
       for (let i = 0; i < buf.count; i++) {
         const ramp = buf.ramp[i]!;
-        const r = 0.95 * (1 - ramp) + buf.r[i]! * ramp;
-        const g = 0.95 * (1 - ramp) + buf.g[i]! * ramp;
-        const b = 0.95 * (1 - ramp) + buf.b[i]! * ramp;
-        const alpha = 0.45 + ramp * 0.4;
+        // Start as a soft warm ink, lerp to the cluster's accent color.
+        const r = 0.45 * (1 - ramp) + buf.r[i]! * ramp;
+        const g = 0.25 * (1 - ramp) + buf.g[i]! * ramp;
+        const b = 0.18 * (1 - ramp) + buf.b[i]! * ramp;
+        const alpha = 0.55 + ramp * 0.35;
         ctx.fillStyle = `rgba(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0}, ${alpha})`;
         const px = cx + buf.x[i]! * scale;
         const py = cy + buf.y[i]! * scale;
-        const sz = live.current.clustering ? 1.5 : 1.9;
+        const sz = live.current.clustering ? 1.6 : 2.0;
         ctx.fillRect(px, py, sz, sz);
       }
-      ctx.globalCompositeOperation = "source-over";
 
       if (live.current.showHalos) {
         for (const c of workflow.clusters) {
           const px = cx + c.centroid[0] * scale;
           const py = cy + c.centroid[1] * scale;
           const radius = 22 + Math.sin(now * 0.0028 + c.cluster_id.length) * 4;
+          // Soft warm halo — peach blooms instead of dark glow.
           const grd = ctx.createRadialGradient(
             px,
             py,
             0,
             px,
             py,
-            radius * 2.4,
+            radius * 2.6,
           );
-          grd.addColorStop(0, `rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.34)`);
-          grd.addColorStop(1, "rgba(0,0,0,0)");
+          grd.addColorStop(0, `rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.22)`);
+          grd.addColorStop(1, "rgba(255, 247, 240, 0)");
           ctx.fillStyle = grd;
           ctx.beginPath();
-          ctx.arc(px, py, radius * 2.4, 0, Math.PI * 2);
+          ctx.arc(px, py, radius * 2.6, 0, Math.PI * 2);
           ctx.fill();
 
           ctx.strokeStyle = `rgba(${c.color[0]}, ${c.color[1]}, ${c.color[2]}, 0.55)`;

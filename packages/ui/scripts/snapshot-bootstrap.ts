@@ -53,9 +53,9 @@ interface BootstrapSnapshot {
 }
 
 async function main() {
-  const ACME = resolve(__dirname, "../../../data/acme-agent");
-  console.log(`[snapshot] scanning ${ACME}`);
-  const scan = await scanRepo(ACME);
+  const FOLK = resolve(__dirname, "../../../data/folk-agent");
+  console.log(`[snapshot] scanning ${FOLK}`);
+  const scan = await scanRepo(FOLK);
   console.log(
     `[snapshot] found ${scan.call_sites.length} call sites: ` +
       `${scan.call_sites.filter((c) => c.priors.pill === "green").length}g/` +
