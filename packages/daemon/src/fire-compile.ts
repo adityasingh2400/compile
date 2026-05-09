@@ -11,8 +11,6 @@
  * Returns the outcome so worker.ts can mark the pending row done/failed.
  */
 
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { scanRepo } from "@compile/scanner";
 import {
   runStage2,
@@ -37,12 +35,11 @@ console.error = (...args: unknown[]) => {
 import type { CallSiteDescriptor } from "@compile/schemas";
 import { lookupFixture, type FixtureEnvelope } from "./fixtures.js";
 import { StubNiaClient } from "@compile/nia";
+import { getAcmeCorpusPath } from "./paths.js";
 
-// Resolve data/acme-agent relative to the repo root (3 levels up from src/)
-// regardless of where the daemon is invoked from.
-// from packages/daemon/src/fire-compile.ts → 3 ups → repo root
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const ACME_AGENT_PATH = resolve(REPO_ROOT, "data/acme-agent");
+// Resolved by paths.ts: bundled corpus inside the installed package, or
+// the monorepo's data/acme-agent in dev mode, or COMPILE_WATCH_TARGET if set.
+const ACME_AGENT_PATH = getAcmeCorpusPath();
 
 const DAEMON_TOTAL_CALLS = 1000;
 const DAEMON_ORACLE_FRACTION = 0.05;

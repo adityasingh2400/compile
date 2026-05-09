@@ -15,8 +15,10 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { createNiaClient } from "@compile/nia";
 import { MemoryReceiptStore } from "@compile/identifier";
 import {
+  ConvexBootstrapStream,
   MemoryBootstrapStream,
   NoopBootstrapStream,
+  convexAdapterFromEnv,
   type IBootstrapStream,
 } from "@compile/stream";
 import {
@@ -39,6 +41,7 @@ import {
   TOOL_DESCRIPTIONS,
   MemoryBootstrapStore,
 } from "./handlers.js";
+import { ensureDaemon } from "./daemon-supervisor.js";
 import type { McpToolName } from "@compile/schemas";
 
 // Nia (D2). createNiaClient picks RealNiaClient when NIA_API_KEY +
@@ -48,14 +51,28 @@ const nia = createNiaClient();
 const store = new MemoryRequestStore();
 const receipts = new MemoryReceiptStore();
 const bootstrap = new MemoryBootstrapStore();
-// Default: noop stream — the stdio MCP server doesn't have a Convex
-// deployment yet. Set COMPILE_STREAM=memory to capture events in-process
-// for local rehearsal; Lane C swaps in ConvexBootstrapStream when the
-// deployment is live.
-const stream: IBootstrapStream =
-  process.env.COMPILE_STREAM === "memory"
-    ? new MemoryBootstrapStream()
-    : new NoopBootstrapStream();
+// Stream selection:
+//   - CONVEX_URL set (default for installed users) → ConvexBootstrapStream
+//     publishes phase/cell/cluster/vault events to the deployed Convex so
+//     the always-on daemon and dashboard see live MCP traffic.
+//   - COMPILE_STREAM=memory → in-process capture for local rehearsal.
+//   - COMPILE_STREAM=noop or no CONVEX_URL → silent (offline dev).
+const stream: IBootstrapStream = (() => {
+  const mode = process.env.COMPILE_STREAM;
+  if (mode === "memory") return new MemoryBootstrapStream();
+  if (mode === "noop") return new NoopBootstrapStream();
+  if (process.env.CONVEX_URL) {
+    try {
+      return new ConvexBootstrapStream({ client: convexAdapterFromEnv() });
+    } catch (err) {
+      console.error(
+        `[compile-mcp] CONVEX_URL set but adapter failed (${(err as Error).message}); falling back to noop stream`,
+      );
+      return new NoopBootstrapStream();
+    }
+  }
+  return new NoopBootstrapStream();
+})();
 // Tensorlake (D1, D6). Default LocalFake when no creds — keeps demos
 // running offline. With TENSORLAKE_API_KEY set we wrap the real client
 // with the local-fallback shim so a sandbox outage drops to in-process
@@ -146,9 +163,27 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 });
 
 async function main(): Promise<void> {
+  // Auto-fork the always-on daemon. Best-effort: any failure logs and lets
+  // the MCP server keep running in lookup-only mode.
+  try {
+    const sup = ensureDaemon();
+    if (sup.status === "spawned") {
+      console.error(`[compile-mcp] daemon spawned pid=${sup.pid} log=${sup.logFile}`);
+    } else if (sup.status === "already-running") {
+      console.error(`[compile-mcp] daemon already running pid=${sup.pid}`);
+    } else {
+      console.error(`[compile-mcp] daemon not started: ${sup.reason}`);
+    }
+  } catch (err) {
+    console.error(`[compile-mcp] daemon supervisor error: ${(err as Error).message}`);
+  }
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[compile-mcp] listening on stdio");
+  console.error(
+    `[compile-mcp] listening on stdio · stream=${stream.constructor.name}${
+      process.env.CONVEX_URL ? ` · convex=${process.env.CONVEX_URL}` : ""
+    }`,
+  );
 }
 
 main().catch((err) => {

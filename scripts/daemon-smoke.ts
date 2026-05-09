@@ -55,6 +55,16 @@ async function main() {
   if (counts.event < 3) throw new Error("no EVENT triggers");
   if (counts.volume < 3) throw new Error("no VOLUME triggers");
 
+  // Wait for the daemon to establish a post-reset baseline SHA before
+  // bumping. Without this gate, the smoke can write .bumped during the
+  // window between reset (which wipes code_sha) and the daemon's first
+  // post-reset code-watch tick — at which point the daemon observes the
+  // already-bumped state as a fresh INSERT, no diff, no CODE_CHANGE.
+  await waitFor("code_sha baseline established", async () => {
+    const row = await client.query(api.daemon.code_sha.get, { target: "data/acme-agent" });
+    return row !== null;
+  });
+
   console.log("smoke: bumping SHA");
   appendFileSync(resolve(process.cwd(), "data/acme-agent/.bumped"), `${Date.now()}\n`);
   await waitFor("CODE_CHANGE fired", async () => {
