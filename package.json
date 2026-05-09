@@ -15,10 +15,17 @@
     "test": "npm run test --workspaces --if-present",
     "dev:mcp": "npm run dev -w @compile/mcp-server",
     "dev:ui": "npm run dev -w @compile/ui",
+    "dev:daemon": "npm run dev -w @compile/daemon",
+    "daemon:ctl": "node --env-file=.env.local --import tsx scripts/replay-control.ts",
+    "daemon:smoke": "node --env-file=.env.local --import tsx scripts/daemon-smoke.ts",
+    "seed:convex": "node --env-file=.env.local --import tsx scripts/seed-convex-traces.ts",
     "snapshot": "npm run snapshot -w @compile/ui",
     "harness": "npm run harness -w @compile/synthesizer",
     "warm": "npm run build -w @compile/runtime && npm run warm -w @compile/runtime",
     "bench": "npm run build -w @compile/synth-loader && npm run bench -w @compile/synth-loader"
+  },
+  "dependencies": {
+    "convex": "^1.38.0"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

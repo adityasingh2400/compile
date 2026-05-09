@@ -159,4 +159,166 @@ export default defineSchema({
     wall_time_ms: v.number(),
     emitted_at: v.string(),
   }).index("by_run", ["run_id"]),
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Always-On Daemon (split: Convex triggers + state, local Node worker)
+  //
+  //  Spike confirmed Convex Node runtime cannot bundle the tensorlake SDK
+  //  (undici incompatibility). So all 4 triggers and all state live here;
+  //  the heavy compute (Tensorlake calls, scanner, synthesizer, Nia) runs
+  //  in packages/daemon/ which subscribes to pending_compiles.
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Pre-loaded trace pool. Replay cron reads in offset_ms order, inserts
+  // into proxy_traces at compressed wall-time. Deterministic demo.
+  seed_traces: defineTable({
+    seq: v.number(),                  // monotonic insertion order
+    offset_ms: v.number(),             // ms since start of seed window
+    call_site_hash: v.string(),
+    payload: v.any(),                  // full trace JSON
+  }).index("by_seq", ["seq"]),
+
+  // Live trace stream. `replayTick` writes; `ingestTrace` mutation reacts.
+  proxy_traces: defineTable({
+    call_site_hash: v.string(),
+    inserted_at: v.string(),
+    payload: v.any(),
+  })
+    .index("by_hash", ["call_site_hash"])
+    .index("by_inserted", ["inserted_at"]),
+
+  // Per-call_site_hash counter. Threshold check reads this.
+  buckets: defineTable({
+    call_site_hash: v.string(),
+    count: v.number(),
+    first_seen_at: v.string(),
+    last_seen_at: v.string(),
+    fired_at: v.optional(v.string()),  // when threshold crossed + enqueued
+    status: v.union(
+      v.literal("collecting"),
+      v.literal("queued"),
+      v.literal("compiling"),
+      v.literal("codified"),
+      v.literal("negative"),
+      v.literal("frontier_only"),
+    ),
+  }).index("by_hash", ["call_site_hash"]),
+
+  // Vault lookup index — mirrors Nia vault entries by call_site_hash so
+  // ingestTrace can do a sub-millisecond skip without round-tripping Nia.
+  // Source of truth is still Nia; this is a read-through cache the daemon
+  // worker keeps in sync via `vault_index_upsert` mutations.
+  vault_index: defineTable({
+    call_site_hash: v.string(),
+    state: v.union(
+      v.literal("POSITIVE"),
+      v.literal("NEGATIVE"),
+    ),
+    function_id: v.optional(v.string()),
+    reason: v.optional(v.string()),       // for NEGATIVE
+    sticky: v.boolean(),                   // negative entries: sticky vs expiring
+    created_at: v.string(),
+    expires_at: v.optional(v.string()),
+  }).index("by_hash", ["call_site_hash"]),
+
+  // The work queue. Convex mutation enqueues; local daemon claims.
+  pending_compiles: defineTable({
+    call_site_hash: v.string(),
+    enqueued_at: v.string(),
+    trigger_source: v.union(
+      v.literal("VOLUME"),
+      v.literal("CODE_CHANGE"),
+      v.literal("MANUAL"),
+    ),
+    bucket_count: v.number(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("claimed"),
+      v.literal("running"),
+      v.literal("done"),
+      v.literal("failed"),
+    ),
+    claimed_by: v.optional(v.string()),  // worker_id
+    claimed_at: v.optional(v.string()),
+    completed_at: v.optional(v.string()),
+    error: v.optional(v.string()),
+    attempt: v.number(),                  // for retry-after-failure
+  })
+    .index("by_status", ["status"])
+    .index("by_hash", ["call_site_hash"]),
+
+  // Outcomes from the local daemon worker.
+  compile_results: defineTable({
+    call_site_hash: v.string(),
+    pending_id: v.id("pending_compiles"),
+    outcome: v.union(
+      v.literal("CODIFIED"),
+      v.literal("NEGATIVE"),
+      v.literal("FAILED"),
+    ),
+    function_id: v.optional(v.string()),
+    schema_stability: v.optional(v.number()),
+    determinism: v.optional(v.number()),
+    oracle_agreement: v.optional(v.number()),
+    cluster_count: v.optional(v.number()),
+    wall_time_ms: v.number(),
+    completed_at: v.string(),
+  }).index("by_hash", ["call_site_hash"]),
+
+  // The visible daemon log pane. UI subscribes; one row per trigger fire,
+  // pipeline step, retry, recovery, etc. Every TRIGGER:* line lives here.
+  trigger_log: defineTable({
+    ts: v.string(),
+    kind: v.union(
+      v.literal("TRIGGER:SCHEDULE"),
+      v.literal("TRIGGER:EVENT"),
+      v.literal("TRIGGER:VOLUME"),
+      v.literal("TRIGGER:CODE_CHANGE"),
+      v.literal("TRIGGER:RECOVERY"),
+      v.literal("STEP"),
+      v.literal("BOOT"),
+      v.literal("ERROR"),
+    ),
+    message: v.string(),
+    call_site_hash: v.optional(v.string()),
+    payload: v.optional(v.any()),
+  })
+    .index("by_ts", ["ts"])
+    .index("by_kind", ["kind"]),
+
+  // Code-change trigger source: SHA of data/acme-agent. codeShaTick reads
+  // this, compares with `git rev-parse`, fires CODE_CHANGE if diff.
+  code_sha: defineTable({
+    target: v.string(),               // e.g. "data/acme-agent"
+    sha: v.string(),
+    observed_at: v.string(),
+  }).index("by_target", ["target"]),
+
+  // Liveness pulse from the local Node worker. heartbeatCheck cron alerts
+  // on stale (>10s) heartbeats. Daemon writes every ~3s while online.
+  daemon_heartbeat: defineTable({
+    worker_id: v.string(),
+    last_seen_at: v.string(),
+    pid: v.number(),
+    triggers_fired: v.object({
+      schedule: v.number(),
+      event: v.number(),
+      volume: v.number(),
+      code_change: v.number(),
+      recovery: v.number(),
+    }),
+    buckets_active: v.number(),
+    vault_size: v.number(),
+  }).index("by_worker", ["worker_id"]),
+
+  // Replay control: lets scripts/replay-control.ts pause/reset/jump the
+  // cursor without restarting the cron.
+  replay_state: defineTable({
+    singleton: v.literal("only"),
+    cursor_seq: v.number(),
+    cursor_offset_ms: v.number(),
+    speed_factor: v.number(),         // 500 = 500× wall time
+    paused: v.boolean(),
+    started_at: v.string(),
+  }).index("by_singleton", ["singleton"]),
 });
