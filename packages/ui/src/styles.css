@@ -628,6 +628,40 @@ button {
   font-weight: 500;
 }
 
+.const-tier-legend {
+  position: absolute;
+  bottom: 110px;
+  left: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 5;
+}
+
+.legend-pill {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: rgba(15, 18, 24, 0.6);
+  border: 1px solid var(--dim);
+  border-radius: 999px;
+  padding: 3px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.legend-pill.t1 .dot { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.legend-pill.t2 .dot { background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+.legend-pill.t3 .dot { background: var(--red); box-shadow: 0 0 4px var(--red); }
+
 /* page 7 — CLUSTERS REVEALED */
 .cluster-label {
   position: absolute;
@@ -1115,7 +1149,9 @@ button {
   width: min(1100px, 90vw);
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
+  padding-top: 40px;
+  padding-bottom: 40px;
 }
 
 .result-headline {
@@ -1147,6 +1183,34 @@ button {
   color: var(--muted);
   letter-spacing: 0.18em;
   margin-top: 8px;
+  -webkit-text-fill-color: var(--muted);
+}
+
+.result-roi {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 10px 22px;
+  border: 1px solid rgba(90, 252, 167, 0.4);
+  background: rgba(90, 252, 167, 0.06);
+  border-radius: 999px;
+  -webkit-text-fill-color: initial;
+  font-family: var(--mono);
+}
+
+.result-roi .roi-multiplier {
+  font-size: 26px;
+  color: var(--green);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  -webkit-text-fill-color: var(--green);
+}
+
+.result-roi .roi-detail {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
   -webkit-text-fill-color: var(--muted);
 }
 

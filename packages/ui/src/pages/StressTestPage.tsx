@@ -78,6 +78,17 @@ export function StressTestPage(): JSX.Element {
           <b>{oraclePct.toFixed(1)}%</b>oracle agreement
         </div>
       </div>
+      <div className="const-tier-legend">
+        <span className="legend-pill t1">
+          <span className="dot" /> tier 1 · typed function · ~$0
+        </span>
+        <span className="legend-pill t2">
+          <span className="dot" /> tier 2 · phi-3-mini · ~$0.0001
+        </span>
+        <span className="legend-pill t3">
+          <span className="dot" /> tier 3 · frontier fallback · ~$0.05
+        </span>
+      </div>
       <div className="const-narration" ref={narrationRef}>
         stress-testing 100,000 synthetic inputs...
       </div>
