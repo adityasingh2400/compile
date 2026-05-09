@@ -1,31 +1,55 @@
 {
-  "name": "@compile/mcp-server",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@compile/mcp",
+  "version": "0.1.0",
+  "description": "MCP server that compiles repeat LLM work out of the agent loop. Logs receipts, identifies codifiable patterns, and routes hot calls to deterministic functions or local LLMs.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "compile-mcp": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rmotgi1227/Compile.git",
+    "directory": "packages/mcp-server"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "llm",
+    "anthropic",
+    "claude",
+    "agent",
+    "codification",
+    "compile"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "esbuild": "^0.24.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
+  },
+  "devDependencies": {
     "@compile/schemas": "*",
     "@compile/nia": "*",
     "@compile/identifier": "*",
     "@compile/runtime": "*",
     "@compile/synthesizer": "*",
-    "@modelcontextprotocol/sdk": "^1.0.4",
-    "zod": "^3.23.8",
-    "zod-to-json-schema": "^3.23.5"
-  },
-  "devDependencies": {
     "tsup": "^8.3.0",
     "typescript": "^5.6.3"
   }
