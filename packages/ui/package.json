@@ -1,0 +1,10 @@
+{
+  "name": "@compile/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'ui: Next.js scaffold pending (Lane C)'",
+    "typecheck": "echo 'ui: Next.js scaffold pending (Lane C)'"
+  }
+}
