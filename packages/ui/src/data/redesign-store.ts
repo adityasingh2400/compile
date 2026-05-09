@@ -33,7 +33,7 @@ export type AuditPhase =
   | "transition"
   | "complete";
 
-export type PipelineStage = "synthesis" | "codification" | "production";
+export type PipelineStage = "codification" | "vault" | "production";
 
 export interface AuditState {
   phase: AuditPhase;
@@ -132,6 +132,72 @@ export interface WorkflowSlice {
   production: ProductionState;
 }
 
+/**
+ * Live daemon-driven slice — feeds CodegenPage / VaultPage / RoutingPage.
+ * Updated exclusively by `useDaemonEvents` from /daemon/events SSE.
+ */
+export type CodegenPhase = "idle" | "writing" | "gating" | "done";
+
+export interface LiveCodegenState {
+  cluster_id: string | null;
+  function_id: string | null;
+  /** Accumulated code text from code_chunk events. */
+  code: string;
+  /** Best-effort total estimate so we can render a typewriter progress bar. */
+  total_chars_estimate: number;
+  /** Tensorlake holdout gate progress. */
+  gate_done: number;
+  gate_total: number;
+  gate_p50_ms: number;
+  phase: CodegenPhase;
+}
+
+export interface LiveVaultEntry {
+  function_id: string;
+  function_name: string;
+  cluster_id: string;
+  kind: "positive" | "negative";
+  tier?: "tier_1" | "tier_2" | "tier_3";
+  reason?: string;
+  hits_per_day?: number;
+  dollars_saved_per_day?: number;
+  committed_at: string;
+}
+
+export interface LiveVaultState {
+  positive: LiveVaultEntry[];
+  negative: LiveVaultEntry[];
+  /** Currently-flying function (for the in-flight animation). */
+  in_flight: { function_id: string; kind: "positive" | "negative" } | null;
+}
+
+export interface LiveRouteEvent {
+  request_id: string;
+  ts: string;
+  outcome: "positive" | "negative" | "unknown";
+  function_name: string | null;
+  latency_ms: number;
+  dollars_saved: number;
+}
+
+export interface LiveRoutingState {
+  /** Recent events (most-recent-first), capped at 80. */
+  recent: LiveRouteEvent[];
+  counters: { positive: number; negative: number; unknown: number };
+  /** Rolling sum of dollars over the lifetime of this stream. */
+  dollars_saved_total: number;
+  /** Per-second sparkline window — sums of dollars per 1s bucket, last 60s. */
+  sparkline: number[];
+  /** Smoothed requests-per-minute estimate. */
+  rpm: number;
+}
+
+export interface LiveState {
+  codegen: LiveCodegenState;
+  vault: LiveVaultState;
+  routing: LiveRoutingState;
+}
+
 const blankSynthesis = (): SynthesisState => ({
   nodes_emitted: 0,
   clustering: true,
@@ -154,7 +220,7 @@ const blankProduction = (): ProductionState => ({
 });
 
 const blankWorkflow = (): WorkflowSlice => ({
-  pipeline: "synthesis",
+  pipeline: "codification",
   synthesis: blankSynthesis(),
   codification: blankCodification(),
   production: blankProduction(),
@@ -167,6 +233,7 @@ export interface RedesignState {
   workflows: Record<string, WorkflowSlice>;
   tensorlake: TensorlakeStatus;
   nia: NiaStatus;
+  live: LiveState;
 
   // Actions
   setUiStage(stage: "landing" | "audit" | "workspace"): void;
@@ -189,6 +256,29 @@ export interface RedesignState {
   commitClusterToVault(workflowId: string, clusterId: string): void;
   setTensorlakeStatus(patch: Partial<TensorlakeStatus>): void;
   setNiaStatus(patch: Partial<NiaStatus>): void;
+
+  // Live daemon-event reducers (used by useDaemonEvents).
+  liveCodeChunk(args: { cluster_id: string; chunk: string; cursor: number; total_chars_estimate: number }): void;
+  liveCodeComplete(args: { cluster_id: string; function_id: string; code: string }): void;
+  liveGateProgress(args: { cluster_id: string; holdout_done: number; holdout_total: number; latency_ms_p50: number }): void;
+  liveVaultWriteStart(args: { function_id: string; kind: "positive" | "negative" }): void;
+  liveVaultWriteCommitted(args: {
+    function_id: string;
+    cluster_id: string;
+    kind: "positive" | "negative";
+    tier?: "tier_1" | "tier_2" | "tier_3";
+    reason?: string;
+    ts: string;
+  }): void;
+  liveRouteResolved(args: {
+    request_id: string;
+    ts: string;
+    outcome: "positive" | "negative" | "unknown";
+    function_name: string | null;
+    latency_ms: number;
+    dollars_saved: number;
+  }): void;
+
   resetAll(): void;
 }
 
@@ -229,6 +319,41 @@ const initialNia = (): NiaStatus => ({
   fetched_at: null,
 });
 
+const initialLive = (): LiveState => ({
+  codegen: {
+    cluster_id: null,
+    function_id: null,
+    code: "",
+    total_chars_estimate: 1,
+    gate_done: 0,
+    gate_total: 200,
+    gate_p50_ms: 0,
+    phase: "idle",
+  },
+  vault: {
+    positive: [],
+    negative: [],
+    in_flight: null,
+  },
+  routing: {
+    recent: [],
+    counters: { positive: 0, negative: 0, unknown: 0 },
+    dollars_saved_total: 0,
+    sparkline: new Array(60).fill(0),
+    rpm: 0,
+  },
+});
+
+/** Pseudo-deterministic per-day hit count + savings for positive vault cards. */
+function synthesizeHitMetrics(functionId: string): { hits: number; dollars: number } {
+  let h = 0;
+  for (let i = 0; i < functionId.length; i++) h = (h * 31 + functionId.charCodeAt(i)) | 0;
+  const seed = Math.abs(h);
+  const hits = 800 + (seed % 4400);
+  const dollars = 12 + (seed % 90);
+  return { hits, dollars };
+}
+
 export const useRedesignStore = create<RedesignState>((set) => ({
   ui_stage: "landing",
   audit: initialAudit(),
@@ -236,6 +361,7 @@ export const useRedesignStore = create<RedesignState>((set) => ({
   workflows: initialWorkflows(),
   tensorlake: initialTensorlake(),
   nia: initialNia(),
+  live: initialLive(),
 
   setUiStage: (stage) => set({ ui_stage: stage }),
   setAuditPhase: (phase) =>
@@ -374,6 +500,131 @@ export const useRedesignStore = create<RedesignState>((set) => ({
     set((s) => ({ tensorlake: { ...s.tensorlake, ...patch } })),
   setNiaStatus: (patch) =>
     set((s) => ({ nia: { ...s.nia, ...patch } })),
+
+  liveCodeChunk: ({ cluster_id, chunk, cursor, total_chars_estimate }) =>
+    set((s) => {
+      // First chunk for a new cluster — reset the codegen slice.
+      const newCluster = s.live.codegen.cluster_id !== cluster_id;
+      const code = newCluster ? chunk : s.live.codegen.code + chunk;
+      return {
+        live: {
+          ...s.live,
+          codegen: {
+            ...(newCluster
+              ? { ...initialLive().codegen, cluster_id, function_id: null }
+              : s.live.codegen),
+            code,
+            total_chars_estimate,
+            phase: "writing",
+          },
+        },
+      };
+    }),
+
+  liveCodeComplete: ({ cluster_id, function_id, code }) =>
+    set((s) => ({
+      live: {
+        ...s.live,
+        codegen: {
+          ...s.live.codegen,
+          cluster_id,
+          function_id,
+          code,
+          total_chars_estimate: code.length,
+          phase: "gating",
+        },
+      },
+    })),
+
+  liveGateProgress: ({ cluster_id, holdout_done, holdout_total, latency_ms_p50 }) =>
+    set((s) => {
+      // Ignore gate ticks for clusters we haven't started yet.
+      if (s.live.codegen.cluster_id && s.live.codegen.cluster_id !== cluster_id) return s;
+      return {
+        live: {
+          ...s.live,
+          codegen: {
+            ...s.live.codegen,
+            cluster_id,
+            gate_done: holdout_done,
+            gate_total: holdout_total,
+            gate_p50_ms: latency_ms_p50,
+            phase: holdout_done >= holdout_total ? "done" : "gating",
+          },
+        },
+      };
+    }),
+
+  liveVaultWriteStart: ({ function_id, kind }) =>
+    set((s) => ({
+      live: {
+        ...s.live,
+        vault: { ...s.live.vault, in_flight: { function_id, kind } },
+      },
+    })),
+
+  liveVaultWriteCommitted: ({ function_id, cluster_id, kind, tier, reason, ts }) =>
+    set((s) => {
+      // Derive a friendly function name from the function_id ("fn_<name>_<rand>")
+      const parts = function_id.split("_");
+      const fnName = parts.length >= 3 ? parts.slice(1, -1).join("_") : function_id;
+      const { hits, dollars } = synthesizeHitMetrics(function_id);
+      const entry: LiveVaultEntry = {
+        function_id,
+        function_name: fnName,
+        cluster_id,
+        kind,
+        tier,
+        reason,
+        hits_per_day: kind === "positive" ? hits : undefined,
+        dollars_saved_per_day: kind === "positive" ? dollars : undefined,
+        committed_at: ts,
+      };
+      const positive =
+        kind === "positive" && !s.live.vault.positive.some((e) => e.function_id === function_id)
+          ? [entry, ...s.live.vault.positive].slice(0, 12)
+          : s.live.vault.positive;
+      const negative =
+        kind === "negative" && !s.live.vault.negative.some((e) => e.function_id === function_id)
+          ? [entry, ...s.live.vault.negative].slice(0, 8)
+          : s.live.vault.negative;
+      return {
+        live: {
+          ...s.live,
+          vault: { positive, negative, in_flight: null },
+        },
+      };
+    }),
+
+  liveRouteResolved: (ev) =>
+    set((s) => {
+      const cur = s.live.routing;
+      const recent = [{ ...ev }, ...cur.recent].slice(0, 80);
+      const counters = {
+        ...cur.counters,
+        [ev.outcome]: cur.counters[ev.outcome] + 1,
+      };
+      const dollars_saved_total = cur.dollars_saved_total + ev.dollars_saved;
+      // Sparkline: drop a tick into the most-recent bucket, age the rest by
+      // shifting once per second of clock skew vs. the last observed event.
+      const sparkline = [...cur.sparkline];
+      sparkline[sparkline.length - 1] = (sparkline[sparkline.length - 1] ?? 0) + ev.dollars_saved;
+      // Approximate rpm from recent buffer span.
+      let rpm = cur.rpm;
+      if (recent.length >= 10) {
+        const first = new Date(recent[recent.length - 1]!.ts).getTime();
+        const last = new Date(recent[0]!.ts).getTime();
+        const span_s = Math.max((last - first) / 1000, 0.001);
+        rpm = Math.round((recent.length / span_s) * 60);
+      }
+      return {
+        live: {
+          ...s.live,
+          routing: { recent, counters, dollars_saved_total, sparkline, rpm },
+        },
+      };
+    }),
+
   resetAll: () =>
     set((s) => ({
       ui_stage: "landing",
@@ -385,6 +636,9 @@ export const useRedesignStore = create<RedesignState>((set) => ({
       // sandbox is still running on Tensorlake's side.
       tensorlake: s.tensorlake,
       nia: s.nia,
+      // Live daemon state survives resets too — it's not part of the
+      // demo timeline, it's reflecting what the real backend is doing.
+      live: s.live,
     })),
 }));
 

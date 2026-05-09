@@ -34,13 +34,6 @@
 // The path is relative to *this* file's location.
 import tracesRaw from "../../../../data/proxy-traces.jsonl?raw";
 import summaryRaw from "../../../../data/proxy-traces-summary.json?raw";
-// Real codified handlers produced by the end-to-end pipeline runner
-// (`scripts/run-pipeline-nia-bench.ts`). When this file exists with
-// non-stub entries, the audit/codification chrome shows the real
-// Claude-emitted (or deterministic-fallback) TS code instead of the
-// stub `buildCodifiedHandler` regex. When the file is empty / has
-// only the empty-object stub, the legacy stub path runs.
-import niaBenchHandlersRaw from "../../../../data/nia-bench-handlers.json?raw";
 
 import type {
   Workflow,
@@ -112,18 +105,6 @@ const WORKFLOW_SCALE_BIAS: Record<string, number> = {
   retrieve_relevant_memory: 0.8,
   infer_relationship_context: 0.4,
   summarize_recent_messages: 0.3,
-  // ── nia-bench (sibling demo target) — judge call sites ────────
-  // The judge fires N times per benchmark run × ~30 runs/month, so
-  // hot codifiable criteria get high scale bias. Frontier residuals
-  // run on the long-tail novel cases only, so smaller scale.
-  judge_no_hallucination: 1.6,
-  judge_correct_replacements: 1.4,
-  judge_correct_import: 1.4,
-  judge_correct_api_usage: 1.0,
-  judge_correct_alternatives: 0.9,
-  judge_overall_quality: 0.5,
-  apply_majority_vote_disagreement: 0.4,
-  classify_hallucination_complex: 0.3,
   // ── Three-pillar Folk repo ────────────────────────────────────
   // META — every iMessage hits classify_message_intent; life events
   // are extracted from a smaller subset of inbound msgs.
@@ -226,15 +207,6 @@ const PRETTY_NAME: Record<string, string> = {
   rewrite_email_formal: "Formal Rewriter",
   draft_outreach_subject: "Outreach Subject",
   generate_marketing_copy: "Marketing Copy",
-  // ── nia-bench (sibling demo target) ───────────────────────────
-  judge_no_hallucination: "Hallucination Gate",
-  judge_correct_replacements: "Migration Replacements",
-  judge_correct_import: "Import Path Check",
-  judge_correct_api_usage: "API Usage Check",
-  judge_correct_alternatives: "Audit Alternatives",
-  judge_overall_quality: "Overall Quality",
-  apply_majority_vote_disagreement: "Majority-Vote Tiebreak",
-  classify_hallucination_complex: "Novel Hallucination",
   // ── Folk — legacy messaging/memory pretty names (kept for any
   // stragglers from older trace corpora) ───────────────────────
   score_message_urgency: "Reply Urgency",
@@ -270,27 +242,6 @@ function prettyName(fn: string): string {
 }
 
 function filePathFor(fn: string): string {
-  // ── nia-bench · all 8 logical workflows route to the single
-  //    physical call site at src/judge/openrouter-client.ts:70.
-  //    The audit chrome will say "1 physical site, 8 logical
-  //    workflows extracted from the rubric criterion taxonomy."
-  if (
-    fn === "judge_no_hallucination" ||
-    fn === "judge_correct_replacements" ||
-    fn === "judge_correct_import" ||
-    fn === "judge_correct_api_usage" ||
-    fn === "judge_correct_alternatives" ||
-    fn === "judge_overall_quality" ||
-    fn === "classify_hallucination_complex"
-  ) {
-    return "src/judge/openrouter-client.ts";
-  }
-  if (fn === "apply_majority_vote_disagreement") {
-    // The majority-vote orchestration lives in rubric-scorer.ts;
-    // it INVOKES the judge but its own tie-break logic is what we
-    // route here so the audit shows two distinct files in play.
-    return "src/judge/rubric-scorer.ts";
-  }
   // ── Three-pillar Folk repo ────────────────────────────────────
   // META · Folk inbox (iMessage/Telegram/Discord agent).
   if (
@@ -432,44 +383,6 @@ function clusterByInputPattern(
       { label: "with_inc", test: (s) => /\bInc\.?\b|\bIncorporated\b/i.test(s) },
       { label: "with_company", test: (s) => /\bCompany\b/i.test(s) },
       { label: "single_word", test: (s) => /^[A-Z][a-zA-Z]+$/.test(s.trim()) },
-    ],
-    // ── nia-bench (sibling demo target) ──────────────────────────
-    judge_no_hallucination: [
-      { label: "next_legacy_patterns", test: (s) => /lib:\s*next/i.test(s) && !/\bclean\b/i.test(s) },
-      { label: "trpc_legacy_patterns", test: (s) => /lib:\s*trpc/i.test(s) && !/\bclean\b/i.test(s) },
-      { label: "react_legacy_patterns", test: (s) => /lib:\s*react/i.test(s) && !/\bclean\b/i.test(s) },
-      { label: "zod_legacy_patterns", test: (s) => /lib:\s*zod/i.test(s) && !/\bclean\b/i.test(s) },
-      { label: "ai_sdk_legacy_patterns", test: (s) => /lib:\s*ai/i.test(s) && !/\bclean\b/i.test(s) },
-      { label: "clean_idiomatic_pass", test: (s) => /\bclean\b/i.test(s) },
-    ],
-    judge_correct_replacements: [
-      { label: "trpc_v10_to_v11", test: (s) => /trpc/i.test(s) },
-      { label: "next_13_to_16_audit", test: (s) => /next\.?js/i.test(s) || /middleware\.ts|sync params|edge/i.test(s) },
-      { label: "ai_sdk_v5_to_v6", test: (s) => /ai sdk/i.test(s) || /generateobject|datastream/i.test(s) },
-      { label: "react_18_to_19_form", test: (s) => /react/i.test(s) || /useformstate|forwardref/i.test(s) },
-      { label: "zod_v3_to_v4", test: (s) => /zod/i.test(s) || /\.email\(\)|\.uuid\(\)|\.ip\(\)/i.test(s) },
-    ],
-    judge_correct_import: [
-      { label: "trpc_client_correct", test: (s) => /createtrpcclient/i.test(s) && /@trpc\/client/i.test(s) },
-      { label: "trpc_client_wrong_path", test: (s) => /createtrpcclient/i.test(s) && /@trpc\/react-query/i.test(s) },
-      { label: "react_dom_client_correct", test: (s) => /createroot/i.test(s) && /react-dom\/client/i.test(s) },
-      { label: "react_dom_client_wrong_path", test: (s) => /reactdom from 'react-dom'/i.test(s) },
-      { label: "ai_sdk_output_present", test: (s) => /Output from 'ai'/i.test(s) && /Output\b/.test(s) },
-      { label: "ai_sdk_output_missing", test: (s) => /Output from 'ai'/i.test(s) && /not imported/i.test(s) },
-      { label: "react_hook_renamed", test: (s) => /useactionstate|useformstate/i.test(s) },
-      { label: "ai_sdk_agent_renamed", test: (s) => /toolloopagent|experimental_agent/i.test(s) },
-    ],
-    judge_correct_api_usage: [
-      { label: "next_response_redirect", test: (s) => /nextresponse\.redirect/i.test(s) },
-      { label: "next_route_matcher", test: (s) => /matcher/i.test(s) },
-      { label: "next_cookies_async", test: (s) => /cookies\(\)/i.test(s) },
-      { label: "trpc_subscription_link", test: (s) => /httpsubscriptionlink/i.test(s) },
-      { label: "trpc_async_generator", test: (s) => /async function\*/i.test(s) },
-    ],
-    judge_correct_alternatives: [
-      { label: "react_17_audit", test: (s) => /react 17/i.test(s) },
-      { label: "next_13_audit", test: (s) => /next\.?js 13/i.test(s) },
-      { label: "ai_sdk_v5_audit", test: (s) => /ai sdk v5|ai sdk 5/i.test(s) },
     ],
     // ── Legacy Folk memory clusters (kept for backwards compat with
     //    older trace corpora — newer three-pillar entries below
@@ -622,55 +535,11 @@ function handlerNameForCluster(workflowFn: string, label: string): string {
   return `handle_${snakeCase(label)}`;
 }
 
-/**
- * Real codified handlers produced by the end-to-end pipeline runner.
- * Keyed by workflow function name (e.g. `judge_no_hallucination`).
- * The pipeline writes this file at `data/nia-bench-handlers.json`.
- *
- * When a workflow has an entry here, `buildCodifiedHandler` returns
- * the real handler code instead of the regex stub. Other workflows
- * (Folk, legacy fixtures) keep the stub path.
- */
-interface RealHandler {
-  fn: string;
-  tier: string;
-  function_name: string;
-  code: string;
-}
-function loadRealHandlers(): Record<string, RealHandler> {
-  try {
-    const parsed = JSON.parse(niaBenchHandlersRaw) as Record<string, unknown>;
-    const out: Record<string, RealHandler> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (
-        typeof v === "object" &&
-        v !== null &&
-        typeof (v as RealHandler).code === "string" &&
-        typeof (v as RealHandler).function_name === "string"
-      ) {
-        out[k] = v as RealHandler;
-      }
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-const REAL_HANDLERS = loadRealHandlers();
-
 function buildCodifiedHandler(
   fnName: string,
   cluster: { label: string; representativeResponse: string; topKeywords: string[] },
   tier: Tier,
 ): string {
-  // If the end-to-end pipeline runner has produced a real handler for
-  // this workflow, prefer it. The handler is the same across clusters
-  // since the workflow itself is the codifiable unit; we prefix a
-  // small comment so the UI's cluster context isn't lost.
-  const real = REAL_HANDLERS[fnName];
-  if (real) {
-    return `// cluster: ${cluster.label} · pipeline handler · tier=${real.tier}\n${real.code}`;
-  }
   if (tier === "tier_2") {
     return `// tier-2 fallback: ambiguous ${cluster.label}\nexport const ${handlerNameForCluster(
       fnName,
@@ -733,35 +602,6 @@ function inferInputFields(traces: ProxyTrace[], fnName: string): SyntheticInputF
     ],
     summarize_support_thread: [
       { name: "thread_text", kind: "text", reason: "full back-and-forth message log" },
-    ],
-    // ── nia-bench (sibling demo target) ──────────────────────────
-    judge_no_hallucination: [
-      { name: "library", kind: "enum", values: ["next", "react", "ai", "trpc", "zod"], reason: "the target library — anchors which hallucination set applies" },
-      { name: "target_version", kind: "string", reason: "version-locked: 13/14/15/16, 17/18/19, 3/4/5/6, etc." },
-      { name: "generated_code", kind: "text", reason: "the candidate code — input to the substring/regex check" },
-      { name: "common_hallucinations", kind: "text", reason: "the task-specified known-bad pattern list (avg 4-5 per task)" },
-    ],
-    judge_correct_replacements: [
-      { name: "library", kind: "enum", values: ["next", "react", "ai", "trpc", "zod"], reason: "version migration is library-specific" },
-      { name: "from_version", kind: "string", reason: "the legacy version we're migrating from" },
-      { name: "to_version", kind: "string", reason: "the target version with the v_new pattern set" },
-      { name: "candidate_code", kind: "text", reason: "the audited candidate's proposed migration" },
-    ],
-    judge_correct_import: [
-      { name: "expected_imports", kind: "text", reason: "list of `(name, from)` import specifiers required by the task" },
-      { name: "absent_imports", kind: "text", reason: "list of imports that MUST NOT be present (deprecated paths)" },
-      { name: "generated_code", kind: "text", reason: "candidate code — pure ts-morph AST scan" },
-    ],
-    judge_correct_api_usage: [
-      { name: "library", kind: "enum", values: ["next", "trpc", "ai", "react"], reason: "API surface differs per library" },
-      { name: "expected_calls", kind: "text", reason: "list of API call expressions the candidate must use" },
-      { name: "context_aware_axes", kind: "string", reason: "control-flow check (e.g. `cookies()` must be awaited)" },
-      { name: "generated_code", kind: "text", reason: "candidate code body" },
-    ],
-    judge_correct_alternatives: [
-      { name: "audit_findings", kind: "text", reason: "list of legacy patterns the candidate identified" },
-      { name: "proposed_replacements", kind: "text", reason: "candidate's suggested v_new replacements per finding" },
-      { name: "library", kind: "enum", values: ["next", "react", "ai", "trpc"], reason: "library-scoped alternative set" },
     ],
     // ── Legacy Folk messaging/memory hints (kept for backwards compat
     //    with older trace corpora — newer three-pillar entries below
@@ -902,37 +742,6 @@ function inferStrategies(traces: ProxyTrace[], fnName: string): SyntheticCallStr
       { name: "amount + date variants", rationale: "$ / USD / EUR / numeric-only · YYYY-MM-DD vs MM/DD/YY", share: 0.3 },
       { name: "OCR noise injection", rationale: "Realistic OCR errors (0/O, 1/l, broken whitespace)", share: 0.2 },
       { name: "negative line items", rationale: "Refund/credit memos that look like invoices", share: 0.15 },
-    ],
-    // ── nia-bench (sibling demo target) ──────────────────────────
-    judge_no_hallucination: [
-      { name: "library × version × hallucination grid", rationale: "5 libraries × ~3 versions × ~5 known-bad patterns = 75 base cells × ~13 paraphrases each = 975 anchor inputs", share: 0.4 },
-      { name: "clean-code adversarial", rationale: "Generated code that LOOKS suspicious but is actually idiomatic — must NOT be flagged FAIL", share: 0.25 },
-      { name: "near-miss patterns", rationale: "Subtle variants of known hallucinations that should still match (typos, partial paths, comment-stripping)", share: 0.2 },
-      { name: "doc-grounded code corpus", rationale: "Real generated code samples from prior benchmark runs in `data/results/`", share: 0.15 },
-    ],
-    judge_correct_replacements: [
-      { name: "v_old → v_new migration grid", rationale: "8 audit task archetypes × 5 typical legacy pattern density = 40 anchor migration scenarios", share: 0.4 },
-      { name: "partial-migration adversarial", rationale: "Candidates that fix some but not all legacy patterns — verdict must be FAIL", share: 0.3 },
-      { name: "doc-grounded migration map", rationale: "Pulls v_old/v_new pairs from `data/nia-bench/reference/<lib>/v<n>.json`", share: 0.2 },
-      { name: "no-op control", rationale: "Already-migrated candidates with zero legacy patterns left", share: 0.1 },
-    ],
-    judge_correct_import: [
-      { name: "import path grid", rationale: "10 expected imports × {present, absent, wrong-path, partial-path} variants = 40 anchor cells", share: 0.5 },
-      { name: "alias / re-export adversarial", rationale: "Imports via path aliases or re-exports that resolve to the same symbol", share: 0.25 },
-      { name: "doc-grounded import corpus", rationale: "Real import statements from the `reference/` API surface JSONs", share: 0.15 },
-      { name: "deprecated-path negatives", rationale: "Imports from paths that were valid in v_old but moved in v_new", share: 0.1 },
-    ],
-    judge_correct_api_usage: [
-      { name: "API call shape grid", rationale: "Library × call-name × argument-shape combinations from the reference docs", share: 0.4 },
-      { name: "context-flow adversarial", rationale: "API used correctly syntactically but wrong context (e.g. `cookies()` not awaited)", share: 0.3 },
-      { name: "doc-grounded API surface", rationale: "Pulls async/sync/params hints from `reference/<lib>/v<n>.json`", share: 0.2 },
-      { name: "close-call near-misses", rationale: "Calls that look right but use deprecated argument shapes", share: 0.1 },
-    ],
-    judge_correct_alternatives: [
-      { name: "finding × alternative grid", rationale: "3 audit task archetypes × 4 typical findings × 3 candidate alternatives each = 36 cells", share: 0.4 },
-      { name: "missed-finding adversarial", rationale: "Candidates that propose great alternatives but missed an obvious legacy pattern", share: 0.3 },
-      { name: "wrong-replacement adversarial", rationale: "Candidates that flag the right finding but propose a v_old → v_old swap", share: 0.2 },
-      { name: "doc-grounded reference solutions", rationale: "Real reference solutions from `tasks/version_locked_audit/*.json`", share: 0.1 },
     ],
     // ── Legacy Folk strategies (kept for backwards compat — newer
     //    three-pillar entries below take precedence on key overlap)

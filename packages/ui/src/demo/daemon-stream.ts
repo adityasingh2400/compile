@@ -6,6 +6,7 @@ import {
 } from "@compile/schemas";
 import { PHASE_INDEX } from "@compile/schemas";
 import type { useStore } from "../store.js";
+import { useRedesignStore } from "../data/redesign-store.js";
 
 type GetState = typeof useStore.getState;
 
@@ -273,6 +274,57 @@ function applyEvent(event: DaemonEvent, getState: GetState): void {
         fallback_count: event.fallback_count,
       });
       advance("result");
+      break;
+
+    // ── Pages 4-6: redesign-store live slice ───────────────────────────
+    case "code_chunk":
+      useRedesignStore.getState().liveCodeChunk({
+        cluster_id: event.cluster_id,
+        chunk: event.chunk,
+        cursor: event.cursor,
+        total_chars_estimate: event.total_chars_estimate,
+      });
+      break;
+    case "code_complete":
+      useRedesignStore.getState().liveCodeComplete({
+        cluster_id: event.cluster_id,
+        function_id: event.function_id,
+        code: event.code,
+      });
+      break;
+    case "gate_progress":
+      useRedesignStore.getState().liveGateProgress({
+        cluster_id: event.cluster_id,
+        holdout_done: event.holdout_done,
+        holdout_total: event.holdout_total,
+        latency_ms_p50: event.latency_ms_p50,
+      });
+      break;
+    case "vault_write_start":
+      useRedesignStore.getState().liveVaultWriteStart({
+        function_id: event.function_id,
+        kind: event.kind_label,
+      });
+      break;
+    case "vault_write_committed":
+      useRedesignStore.getState().liveVaultWriteCommitted({
+        function_id: event.function_id,
+        cluster_id: event.cluster_id,
+        kind: event.kind_label,
+        tier: event.tier,
+        reason: event.reason,
+        ts: event.ts,
+      });
+      break;
+    case "route_resolved":
+      useRedesignStore.getState().liveRouteResolved({
+        request_id: event.request_id,
+        ts: event.ts,
+        outcome: event.outcome,
+        function_name: event.function_name ?? null,
+        latency_ms: event.latency_ms,
+        dollars_saved: event.dollars_saved,
+      });
       break;
   }
 }

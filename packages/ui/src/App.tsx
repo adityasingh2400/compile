@@ -34,8 +34,8 @@ import { Workspace, resetWorkflowDriver } from "./redesign/Workspace.js";
 import { useTensorlakeStatus } from "./redesign/useTensorlakeStatus.js";
 
 const PIPELINE_ORDER: PipelineStage[] = [
-  "synthesis",
   "codification",
+  "vault",
   "production",
 ];
 
@@ -57,7 +57,21 @@ export function App(): JSX.Element {
       const state = useRedesignStore.getState();
       const activeId = state.active_workflow_id;
       const slice = activeId ? state.workflows[activeId] : null;
-      const cur = slice?.pipeline ?? "synthesis";
+      const cur: PipelineStage = slice?.pipeline ?? "codification";
+
+      // Audit → workspace skip: when the audit timeline is parked on the
+      // manifest screen, Enter/→/Space jumps straight into the workspace.
+      // Without this you're stuck for ~45s waiting on the auto-advance.
+      if (
+        state.ui_stage === "audit" &&
+        (state.audit.phase === "manifest" || state.audit.phase === "transition") &&
+        (e.key === "Enter" || e.key === " " || e.key === "ArrowRight")
+      ) {
+        e.preventDefault();
+        state.setAuditPhase("complete");
+        state.setUiStage("workspace");
+        return;
+      }
 
       if (e.key >= "1" && e.key <= "9") {
         const idx = parseInt(e.key, 10) - 1;
@@ -92,14 +106,14 @@ export function App(): JSX.Element {
       if (e.key === "q" || e.key === "Q") {
         if (activeId) {
           e.preventDefault();
-          setPipelineStage(activeId, "synthesis");
+          setPipelineStage(activeId, "codification");
         }
         return;
       }
       if (e.key === "w" || e.key === "W") {
         if (activeId) {
           e.preventDefault();
-          setPipelineStage(activeId, "codification");
+          setPipelineStage(activeId, "vault");
         }
         return;
       }

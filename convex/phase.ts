@@ -97,3 +97,18 @@ export const get = query({
       .first();
   },
 });
+
+export const reset = mutation({
+  args: { run_id: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("bootstrap_phase")
+      .withIndex("by_run", (q) => q.eq("run_id", args.run_id))
+      .first();
+    if (existing) {
+      await ctx.db.delete(existing._id);
+      return { deleted: true, run_id: args.run_id };
+    }
+    return { deleted: false, run_id: args.run_id };
+  },
+});

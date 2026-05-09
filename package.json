@@ -25,10 +25,9 @@
     "warm": "npm run build -w @compile/runtime && npm run warm -w @compile/runtime",
     "prewarm:ui": "npm run build -w @compile/nia && npm run build -w @compile/runtime && npm run prewarm:ui -w @compile/runtime",
     "bench": "npm run build -w @compile/synth-loader && npm run bench -w @compile/synth-loader",
-    "daemon:fake": "node scripts/serve-fake-daemon.mjs",
+    "daemon:fake": "node --env-file=.env.local scripts/serve-fake-daemon.mjs",
     "convex:dev": "convex dev",
-    "convex:deploy": "convex deploy",
-    "pipeline:nia": "node --env-file=.env.local --import tsx scripts/run-pipeline-nia-bench.ts"
+    "convex:deploy": "convex deploy"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",

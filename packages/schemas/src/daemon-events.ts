@@ -161,6 +161,104 @@ export const FireCompleteSchema = z.object({
 });
 export type FireComplete = z.infer<typeof FireCompleteSchema>;
 
+/**
+ * Pages 4-6 wiring — agent codegen, vault write animation, end-to-end routing.
+ * These events drive CodegenPage / VaultPage / RoutingPage. Same SSE channel.
+ */
+
+/** Agent emitted another chunk of TS. UI streams it into the typewriter pane. */
+export const CodeChunkSchema = z.object({
+  kind: z.literal("code_chunk"),
+  ts: Iso,
+  cluster_id: z.string(),
+  /** Newly emitted code text since the previous chunk. UI appends. */
+  chunk: z.string(),
+  /** Cumulative character offset after this chunk. */
+  cursor: z.number().int().nonnegative(),
+  /** Best-effort estimate of total final size for the progress meter. */
+  total_chars_estimate: z.number().int().positive(),
+});
+export type CodeChunk = z.infer<typeof CodeChunkSchema>;
+
+/** Final code blob ready. UI freezes typewriter and moves into gate phase. */
+export const CodeCompleteSchema = z.object({
+  kind: z.literal("code_complete"),
+  ts: Iso,
+  cluster_id: z.string(),
+  /** Stable function id used as the vault key on commit. */
+  function_id: z.string(),
+  /** Full final source, for syntax-highlighted display + copy button. */
+  code: z.string(),
+  /** Content hash of the code blob (for staleness checks). */
+  sha: z.string(),
+  line_count: z.number().int().nonnegative(),
+});
+export type CodeComplete = z.infer<typeof CodeCompleteSchema>;
+
+/**
+ * Tensorlake holdout-gate progress tick. Like phi_tick but for the
+ * post-codegen validation pass. Lights the right-side panel on Page 4.
+ */
+export const GateProgressSchema = z.object({
+  kind: z.literal("gate_progress"),
+  ts: Iso,
+  cluster_id: z.string(),
+  holdout_done: z.number().int().nonnegative(),
+  holdout_total: z.number().int().positive(),
+  /** Running p50 latency in ms across completed holdout traces. */
+  latency_ms_p50: z.number().nonnegative(),
+});
+export type GateProgress = z.infer<typeof GateProgressSchema>;
+
+/**
+ * Function flying into the Nia vault. UI plays the in-flight animation.
+ * Both positive (committed) and negative (declined) writes use this kind —
+ * the `kind_label` field discriminates which shelf it lands on.
+ */
+export const VaultWriteStartSchema = z.object({
+  kind: z.literal("vault_write_start"),
+  ts: Iso,
+  cluster_id: z.string(),
+  function_id: z.string(),
+  kind_label: z.enum(["positive", "negative"]),
+});
+export type VaultWriteStart = z.infer<typeof VaultWriteStartSchema>;
+
+/** Vault commit landed. UI snaps the card into place on the correct shelf. */
+export const VaultWriteCommittedSchema = z.object({
+  kind: z.literal("vault_write_committed"),
+  ts: Iso,
+  cluster_id: z.string(),
+  function_id: z.string(),
+  kind_label: z.enum(["positive", "negative"]),
+  /** Nia vault page id (positive only). */
+  vault_page_id: z.string().optional(),
+  /** Reason chip shown on negative entries (e.g. "oracle_disagreement"). */
+  reason: z.string().optional(),
+  tier: z.enum(["tier_1", "tier_2", "tier_3"]).optional(),
+});
+export type VaultWriteCommitted = z.infer<typeof VaultWriteCommittedSchema>;
+
+/**
+ * A live request was resolved by the routing layer. Drives Page 6 — each
+ * event lights up one of the three lanes and bumps the rolling counters.
+ */
+export const RouteResolvedSchema = z.object({
+  kind: z.literal("route_resolved"),
+  ts: Iso,
+  request_id: z.string(),
+  cluster_signature: z.string(),
+  /** Which lane lit up. Maps to positive/negative/unknown bucket. */
+  outcome: z.enum(["positive", "negative", "unknown"]),
+  /** Function name when outcome == "positive", else null. */
+  function_name: z.string().nullable().optional(),
+  /** Wall-clock latency for this request in ms. */
+  latency_ms: z.number().nonnegative(),
+  /** Marginal $ saved vs. frontier-LLM baseline (negative=0, unknown=0). */
+  dollars_saved: z.number().nonnegative(),
+});
+export type RouteResolved = z.infer<typeof RouteResolvedSchema>;
+
 /** Discriminated union over every event kind. */
 export const DaemonEventSchema = z.discriminatedUnion("kind", [
   UptimeTickSchema,
@@ -172,6 +270,12 @@ export const DaemonEventSchema = z.discriminatedUnion("kind", [
   OracleAgreementSchema,
   FallbackEngagedSchema,
   FireCompleteSchema,
+  CodeChunkSchema,
+  CodeCompleteSchema,
+  GateProgressSchema,
+  VaultWriteStartSchema,
+  VaultWriteCommittedSchema,
+  RouteResolvedSchema,
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEventSchema>;
 

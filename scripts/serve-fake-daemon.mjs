@@ -166,6 +166,81 @@ const FAN_OUT_CLUSTERS = [
   { id: "cluster_message_intent_v2", fn: "classifyMessageIntent", sig: "openai|messageIntent_v2|tools=0", samples: 50 },
   { id: "cluster_event_extract_v1", fn: "extractEventFromMessage", sig: "openai|eventExtract_v1|tools=0", samples: 50 },
 ];
+
+/** Pre-generated code blobs streamed char-by-char as the agent "writes". */
+const CODE_BLOBS = {
+  classifyMessageIntent: `import { z } from "zod";
+
+const IntentSchema = z.enum([
+  "scheduling", "follow_up", "introduction", "thank_you",
+  "request", "decline", "casual", "urgent",
+]);
+
+export type MessageIntent = z.infer<typeof IntentSchema>;
+
+const KEYWORD_HINTS: Record<MessageIntent, RegExp[]> = {
+  scheduling: [/\\b(meet|schedule|calendar|when works|available)\\b/i],
+  follow_up:  [/\\b(checking in|circling back|any update)\\b/i],
+  introduction: [/\\b(introduce|wanted to connect|reach out)\\b/i],
+  thank_you:  [/\\b(thanks|thank you|appreciate)\\b/i],
+  request:    [/\\b(could you|can you|would you|please)\\b/i],
+  decline:    [/\\b(unfortunately|can't|won't be able)\\b/i],
+  casual:     [/\\b(hey|sup|what's up)\\b/i],
+  urgent:     [/\\b(urgent|asap|today|right now)\\b/i],
+};
+
+export function classifyMessageIntent(input: { body: string }): MessageIntent {
+  const b = input.body.trim();
+  for (const [intent, hints] of Object.entries(KEYWORD_HINTS) as [MessageIntent, RegExp[]][]) {
+    if (hints.some((re) => re.test(b))) return intent;
+  }
+  return "casual";
+}
+`,
+  extractEventFromMessage: `import { z } from "zod";
+
+const ExtractedEventSchema = z.object({
+  has_event: z.boolean(),
+  title: z.string().optional(),
+  start_iso: z.string().datetime().optional(),
+  duration_min: z.number().int().positive().optional(),
+});
+
+export type ExtractedEvent = z.infer<typeof ExtractedEventSchema>;
+
+const TIME_RE = /\\b(\\d{1,2})(:\\d{2})?\\s*(am|pm)?\\b/i;
+const DAY_RE  = /\\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday)\\b/i;
+
+export function extractEventFromMessage(input: { body: string }): ExtractedEvent {
+  const day = input.body.match(DAY_RE);
+  const time = input.body.match(TIME_RE);
+  if (!day && !time) return { has_event: false };
+  const title = input.body.split(/[.!?\\n]/)[0]?.slice(0, 80) ?? "Untitled";
+  return {
+    has_event: true,
+    title,
+    start_iso: synthesizeIso(day?.[1] ?? "today", time?.[0] ?? "09:00"),
+    duration_min: 30,
+  };
+}
+
+function synthesizeIso(day: string, time: string): string {
+  const base = new Date();
+  if (day === "tomorrow") base.setDate(base.getDate() + 1);
+  return base.toISOString();
+}
+`,
+};
+
+/** Patterns we *don't* compile — populates the negative vault on Page 5. */
+const NEGATIVE_PATTERNS = [
+  { fn: "fuzzy_intent_classifier", reason: "oracle_disagreement", retry: "30d" },
+  { fn: "vague_status_check", reason: "high_entropy", retry: "never" },
+  { fn: "stub_question_answer", reason: "low_confidence", retry: "7d" },
+  { fn: "open_ended_summary", reason: "schema_unstable", retry: "14d" },
+  { fn: "creative_rewrite", reason: "non_deterministic", retry: "never" },
+  { fn: "subjective_review", reason: "oracle_disagreement", retry: "30d" },
+];
 const VAULT_HIT_CLUSTERS = [
   {
     id: "cluster_message_intent",
@@ -282,6 +357,98 @@ async function fanOutFire() {
   });
   await sleep(1500);
 
+  // ── Page 4: agent typewrites the function ──────────────────────────────
+  const code = CODE_BLOBS[cluster.fn] ?? CODE_BLOBS.classifyMessageIntent;
+  const functionId = `fn_${cluster.fn}_${Date.now().toString(36)}`;
+  let cursor = 0;
+  const codeTotal = code.length;
+  while (cursor < codeTotal) {
+    const stride = 18 + Math.floor(Math.random() * 30);
+    const next = Math.min(codeTotal, cursor + stride);
+    const chunk = code.slice(cursor, next);
+    cursor = next;
+    pushEvent({
+      kind: "code_chunk",
+      ts: isoNow(),
+      cluster_id: cluster.id,
+      chunk,
+      cursor,
+      total_chars_estimate: codeTotal,
+    });
+    await sleep(120);
+  }
+  pushEvent({
+    kind: "code_complete",
+    ts: isoNow(),
+    cluster_id: cluster.id,
+    function_id: functionId,
+    code,
+    sha: `sha_${Math.random().toString(36).slice(2, 12)}`,
+    line_count: code.split("\n").length,
+  });
+  await sleep(400);
+
+  // ── Page 4 right pane: Tensorlake holdout gate ─────────────────────────
+  const gateTotal = 200;
+  let gateDone = 0;
+  while (gateDone < gateTotal) {
+    gateDone = Math.min(gateTotal, gateDone + 8 + Math.floor(Math.random() * 12));
+    pushEvent({
+      kind: "gate_progress",
+      ts: isoNow(),
+      cluster_id: cluster.id,
+      holdout_done: gateDone,
+      holdout_total: gateTotal,
+      latency_ms_p50: 3.2 + Math.random() * 1.6,
+    });
+    await sleep(160);
+  }
+  await sleep(400);
+
+  // ── Page 5: vault write animation ──────────────────────────────────────
+  pushEvent({
+    kind: "vault_write_start",
+    ts: isoNow(),
+    cluster_id: cluster.id,
+    function_id: functionId,
+    kind_label: "positive",
+  });
+  await sleep(900);
+  pushEvent({
+    kind: "vault_write_committed",
+    ts: isoNow(),
+    cluster_id: cluster.id,
+    function_id: functionId,
+    kind_label: "positive",
+    vault_page_id: `nia_pg_${Math.random().toString(36).slice(2, 10)}`,
+    tier: "tier_1",
+  });
+  await sleep(300);
+
+  // Every fourth fan-out, also write a negative entry so the negative
+  // shelf populates over the demo.
+  if (cycleCounter % 8 === 0) {
+    const neg = NEGATIVE_PATTERNS[(cycleCounter / 8) % NEGATIVE_PATTERNS.length | 0];
+    const negId = `fn_${neg.fn}_${Date.now().toString(36)}`;
+    pushEvent({
+      kind: "vault_write_start",
+      ts: isoNow(),
+      cluster_id: `cluster_${neg.fn}`,
+      function_id: negId,
+      kind_label: "negative",
+    });
+    await sleep(700);
+    pushEvent({
+      kind: "vault_write_committed",
+      ts: isoNow(),
+      cluster_id: `cluster_${neg.fn}`,
+      function_id: negId,
+      kind_label: "negative",
+      reason: neg.reason,
+    });
+    await sleep(300);
+  }
+
   const dollarsThis = 8_400 + Math.floor(Math.random() * 4_200);
   dollarsSaved += dollarsThis;
   firesTotal += 1;
@@ -390,6 +557,53 @@ async function vaultHitFire() {
   });
 }
 
+/**
+ * Continuous live-routing simulation. Drives Page 6: each event lights one
+ * of three lanes. Weighted 94% positive / 4% negative / 2% unknown.
+ */
+const POSITIVE_FNS = [
+  "classifyMessageIntent", "extractEventFromMessage", "scoreMessageUrgency",
+  "scoreRelationshipWarmth", "summarizeThreadForMemory", "applyUserWritingStyle",
+  "classifySpamMessage",
+];
+async function routeLoop() {
+  await sleep(3000);
+  while (true) {
+    const r = Math.random();
+    let outcome, latency, dollars, fn, sig;
+    if (r < 0.94) {
+      outcome = "positive";
+      fn = POSITIVE_FNS[Math.floor(Math.random() * POSITIVE_FNS.length)];
+      sig = `openai|${fn}|tools=0`;
+      latency = 2.1 + Math.random() * 5.4;
+      dollars = 0.0008 + Math.random() * 0.0014;
+    } else if (r < 0.98) {
+      outcome = "negative";
+      fn = null;
+      sig = `openai|fuzzy_pattern_${Math.random().toString(36).slice(2, 6)}|tools=0`;
+      latency = 0.4 + Math.random() * 0.6;
+      dollars = 0;
+    } else {
+      outcome = "unknown";
+      fn = null;
+      sig = `openai|new_pattern_${Math.random().toString(36).slice(2, 6)}|tools=0`;
+      latency = 800 + Math.random() * 800;
+      dollars = 0;
+    }
+    pushEvent({
+      kind: "route_resolved",
+      ts: isoNow(),
+      request_id: `req_${Math.random().toString(36).slice(2, 10)}`,
+      cluster_signature: sig,
+      outcome,
+      function_name: fn,
+      latency_ms: latency,
+      dollars_saved: dollars,
+    });
+    await sleep(60 + Math.random() * 80);
+  }
+}
+
 async function uptimeLoop() {
   while (true) {
     pushEvent({
@@ -442,9 +656,12 @@ async function bootstrapConvex() {
 async function fireLoop() {
   // Brief boot delay so judges see "fixture mode → live" transition.
   await sleep(2000);
+  // Open with a fan-out (not vault-hit) so the codify page is populated
+  // within ~5s of landing. After that, alternate as before.
+  cycleCounter = 0;
   while (true) {
     cycleCounter++;
-    if (cycleCounter % 2 === 0) {
+    if (cycleCounter % 2 === 1) {
       await fanOutFire();
     } else {
       await vaultHitFire();
@@ -490,3 +707,4 @@ server.listen(PORT, () => {
 bootstrapConvex();
 uptimeLoop().catch((err) => console.error("[fake-daemon] uptime loop crashed:", err));
 fireLoop().catch((err) => console.error("[fake-daemon] fire loop crashed:", err));
+routeLoop().catch((err) => console.error("[fake-daemon] route loop crashed:", err));
