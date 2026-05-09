@@ -8,17 +8,17 @@ const DOC_POSITIONS: { left: string; top: string; rotate: string }[] = [
 ];
 
 const DOC_TITLES = [
-  "Acme · ICP.md",
-  "Acme · Pricing.md",
-  "Acme · Policy.md",
-  "Acme · CompetitiveLandscape.md",
+  "Folk · ICP.md",
+  "Folk · Pricing.md",
+  "Folk · UserPersona.md",
+  "Folk · MessagingArchitecture.md",
 ];
 
 const DOC_TEXT = [
-  "Ideal customer profile:\n• Mid-market SaaS\n• 50-1000 employees\n• Payment infra or vertical AI\n• North America or EMEA\n• ARR $1M – $50M\n• Series A through C\n• PLG or hybrid\n• Pain: integration cost\n• Decision criteria: TTV ≤ 14 days",
-  "Pricing tiers:\nStarter $99/mo · 100K events\nPro $499/mo · 2M events\nEnterprise call · custom\n\nUsage-based add-ons:\n• Compute hours\n• Storage GB\n• Outbound bandwidth",
-  "Trust & compliance:\nSOC2 Type II\nGDPR · CCPA\nHIPAA available on Enterprise tier\nSSO via SAML / OIDC\nSCIM provisioning\nTraffic encrypted in transit and at rest",
-  "Competitors:\n• Stripe — payments only\n• Plaid — banking data\n• Persona — identity\n\nDifferentiators:\n• End-to-end risk model\n• Embedded UX components\n• Network effects via shared signals",
+  "Ideal Folk customer:\n• Founders, executives, creators\n• 200+ inbound DMs/day\n• Already pay for ChatGPT Plus / Claude Pro\n• North America, UK, EU\n• Comfortable with always-on agents\n• Pro tier ($100/mo) candidate\n• Travel frequency drives cron-watcher value\n• Existing AI tool spend ≥ $40/mo",
+  "Pricing tiers:\nPersonal $20/mo · 6,000 msgs\nPro $100/mo · 30,000 msgs\nPlus call · custom\n\nAdd-ons:\n• WhatsApp Business API · $30/mo\n• Custom voice fine-tune · $250\n• Family plan up to 5 seats · +$60/mo",
+  "User persona — Arlan:\n• 47 DMs in last 6 hours\n• Half logistics, quarter relationship\n• Lowercase, terse, busy\n• Skips greetings, jumps to asks\n• Uses emoji sparingly\n• Replies fastest to co-founder + investors\n• Replies slowest to recruiters",
+  "Messaging architecture:\n• iMessage via macOS Messages full-disk-access\n• Telegram via Bot API\n• Discord via gateway WebSocket\n• Vercel AI Gateway routes Sonnet 4.5 / GPT-5\n• Nia Vault for memory + persona storage\n• Hermes Agent loop · 5–15 turns/inbound\n• 60s cron for flights, listings, calendar",
 ];
 
 export function ReadingDocsPage(): JSX.Element {

@@ -31,7 +31,7 @@ export function ResultPage(): JSX.Element {
   return (
     <div className="result-stage">
       <div className="result-headline">
-        compile bootstrap complete · acme/agent · {wallSec}s wall time
+        compile bootstrap complete · folk/agent · {wallSec}s wall time
       </div>
       <div className="result-savings">
         ${savings.toLocaleString()}

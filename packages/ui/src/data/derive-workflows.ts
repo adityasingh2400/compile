@@ -93,6 +93,18 @@ const WORKFLOW_SCALE_BIAS: Record<string, number> = {
   resolve_company_domain: 0.5,
   summarize_support_thread: 0.4,
   rewrite_email_formal: 0.3,
+  // Folk — inbound msg pipeline runs on every text, ×2 hot-path bias.
+  classify_message_intent: 2.0,
+  score_message_urgency: 1.6,
+  extract_event_from_message: 0.9,
+  apply_user_writing_style: 0.5,
+  draft_reply_in_user_voice: 1.2,
+  // Folk — memory layer; warmth fires per draft, summarize per closed thread.
+  score_relationship_warmth: 1.4,
+  summarize_thread_for_memory: 0.6,
+  retrieve_relevant_memory: 0.8,
+  infer_relationship_context: 0.4,
+  summarize_recent_messages: 0.3,
 };
 
 function scaleFor(fnName: string): number {
@@ -174,6 +186,17 @@ const PRETTY_NAME: Record<string, string> = {
   rewrite_email_formal: "Formal Rewriter",
   draft_outreach_subject: "Outreach Subject",
   generate_marketing_copy: "Marketing Copy",
+  // Folk
+  classify_message_intent: "Message Intent",
+  score_message_urgency: "Reply Urgency",
+  extract_event_from_message: "Event Extractor",
+  apply_user_writing_style: "Voice Rewriter",
+  draft_reply_in_user_voice: "Reply Drafter",
+  score_relationship_warmth: "Relationship Warmth",
+  summarize_thread_for_memory: "Thread Memory",
+  retrieve_relevant_memory: "Memory Retriever",
+  infer_relationship_context: "Relationship Context",
+  summarize_recent_messages: "Recent Summary",
 };
 
 function prettyName(fn: string): string {
@@ -185,7 +208,26 @@ function prettyName(fn: string): string {
 }
 
 function filePathFor(fn: string): string {
-  // Heuristic: lead/icp/extract/domain/research → src/icp.ts; rest → src/ops.ts
+  // Folk — memory layer (anthropic) vs messaging layer (openai)
+  if (
+    fn === "score_relationship_warmth" ||
+    fn === "summarize_thread_for_memory" ||
+    fn === "retrieve_relevant_memory" ||
+    fn === "infer_relationship_context" ||
+    fn === "summarize_recent_messages"
+  ) {
+    return "src/memory.ts";
+  }
+  if (
+    fn === "classify_message_intent" ||
+    fn === "score_message_urgency" ||
+    fn === "extract_event_from_message" ||
+    fn === "apply_user_writing_style" ||
+    fn === "draft_reply_in_user_voice"
+  ) {
+    return "src/messaging.ts";
+  }
+  // Acme heuristic: lead/icp/extract/domain/research → src/icp.ts; rest → src/ops.ts
   if (
     fn.includes("lead") ||
     fn.includes("icp") ||
@@ -300,6 +342,20 @@ function clusterByInputPattern(
       { label: "with_inc", test: (s) => /\bInc\.?\b|\bIncorporated\b/i.test(s) },
       { label: "with_company", test: (s) => /\bCompany\b/i.test(s) },
       { label: "single_word", test: (s) => /^[A-Z][a-zA-Z]+$/.test(s.trim()) },
+    ],
+    // ── Folk fall-through clusters when categorical inference fails ─
+    extract_event_from_message: [
+      { label: "flight", test: (s) => /\bflight\b|\bSFO\b|\bJFK\b|\bairport\b/i.test(s) },
+      { label: "meeting", test: (s) => /\bmeeting\b|\bcall\b|\bsync\b|\bdemo\b/i.test(s) },
+      { label: "deadline", test: (s) => /\bdeadline\b|\bship\b|\bdue\b/i.test(s) },
+      { label: "booking", test: (s) => /\bdinner\b|\brestaurant\b|\bbooked\b|\btable\b/i.test(s) },
+      { label: "task", test: (s) => /\bship\b|\bpicture\b|\brecital\b|\bdoctor\b/i.test(s) },
+    ],
+    summarize_thread_for_memory: [
+      { label: "logistics", test: (s) => /\b(meeting|call|dinner|book|flight|ship)\b/i.test(s) },
+      { label: "emotional", test: (s) => /\b(love|miss|sorry|hurt|happy|sweetie)\b/i.test(s) },
+      { label: "work_followup", test: (s) => /\b(bug|deploy|prod|review|PR|launch)\b/i.test(s) },
+      { label: "casual", test: (s) => /\b(yo|sup|wassup|lol)\b/i.test(s) },
     ],
   };
   const rules = RULES[fnName];
@@ -467,6 +523,53 @@ function inferInputFields(traces: ProxyTrace[], fnName: string): SyntheticInputF
     summarize_support_thread: [
       { name: "thread_text", kind: "text", reason: "full back-and-forth message log" },
     ],
+    // ── Folk ────────────────────────────────────────────────────────
+    classify_message_intent: [
+      { name: "text", kind: "text", reason: "raw inbound message body — wide variance" },
+      { name: "sender_id", kind: "string", reason: "contact identifier — drives tone prior" },
+      { name: "channel", kind: "enum", values: ["imessage", "telegram", "discord"], reason: "different channels carry different intent priors" },
+      { name: "thread_length", kind: "int", range: [0, 200], reason: "long threads bias toward logistics/task" },
+    ],
+    score_message_urgency: [
+      { name: "text", kind: "text", reason: "message body where urgency cues live" },
+      { name: "sender_relationship", kind: "enum", values: ["family", "co_founder", "friend", "client", "investor", "stranger"], reason: "boss/family always-immediate; stranger always-later" },
+      { name: "time_of_day", kind: "enum", values: ["morning", "workhours", "evening", "night"], reason: "off-hours msgs default to lower urgency" },
+    ],
+    extract_event_from_message: [
+      { name: "text", kind: "text", reason: "free-text where dates/times/locations live" },
+      { name: "user_timezone", kind: "string", reason: "needed to resolve relative times (\"tonight\")" },
+      { name: "today_iso", kind: "string", reason: "anchor for relative dates" },
+    ],
+    apply_user_writing_style: [
+      { name: "draft", kind: "text", reason: "candidate reply, formal-baseline" },
+      { name: "style_excerpts", kind: "text", reason: "user's prior msgs as tone reference" },
+    ],
+    draft_reply_in_user_voice: [
+      { name: "inbound", kind: "text", reason: "the message being replied to" },
+      { name: "history", kind: "text", reason: "thread context — usually 5-15 prior turns" },
+      { name: "persona", kind: "text", reason: "user's voice profile from Vault" },
+      { name: "context", kind: "text", reason: "relationship + recent events context" },
+    ],
+    score_relationship_warmth: [
+      { name: "contact_id", kind: "string", reason: "primary key into Vault" },
+      { name: "total_msgs_30d", kind: "int", range: [0, 1000], reason: "frequency axis driver" },
+      { name: "recent_thread", kind: "text", reason: "last 5-10 turns for intimacy signal" },
+    ],
+    summarize_thread_for_memory: [
+      { name: "thread", kind: "text", reason: "full thread to compress into memory" },
+      { name: "thread_length", kind: "int", range: [3, 200], reason: "long threads need lossier compression" },
+    ],
+    retrieve_relevant_memory: [
+      { name: "query", kind: "text", reason: "user's question to surface memory for" },
+      { name: "candidate_memories", kind: "text", reason: "shortlist from Vault semantic search" },
+    ],
+    infer_relationship_context: [
+      { name: "contact_id", kind: "string", reason: "contact key" },
+      { name: "vault_excerpts", kind: "text", reason: "Vault page snippets" },
+    ],
+    summarize_recent_messages: [
+      { name: "messages", kind: "text", reason: "last N messages across all threads" },
+    ],
   };
   if (PER_WF[fnName]) return PER_WF[fnName]!;
 
@@ -517,6 +620,42 @@ function inferStrategies(traces: ProxyTrace[], fnName: string): SyntheticCallStr
       { name: "amount + date variants", rationale: "$ / USD / EUR / numeric-only · YYYY-MM-DD vs MM/DD/YY", share: 0.3 },
       { name: "OCR noise injection", rationale: "Realistic OCR errors (0/O, 1/l, broken whitespace)", share: 0.2 },
       { name: "negative line items", rationale: "Refund/credit memos that look like invoices", share: 0.15 },
+    ],
+    // ── Folk ────────────────────────────────────────────────────────
+    classify_message_intent: [
+      { name: "intent template paraphrase", rationale: "16 archetypal inbound patterns × 6 paraphrases each = 96 variants", share: 0.4 },
+      { name: "channel × intent permutation", rationale: "Same intent phrased in iMessage vs Telegram vs Discord style", share: 0.25 },
+      { name: "spam adversarial", rationale: "Promo/phishing patterns to harden the spam branch", share: 0.2 },
+      { name: "doc-grounded ICP variants", rationale: "Pulls real-shaped messages from icp.md persona examples", share: 0.15 },
+    ],
+    score_message_urgency: [
+      { name: "sender × intent grid", rationale: "6 sender types × 5 urgency lexical patterns = 30 cells", share: 0.4 },
+      { name: "time-of-day permutation", rationale: "Same message at 9am vs 11pm shifts urgency", share: 0.25 },
+      { name: "deadline language fuzz", rationale: "EOD / EOW / asap / tonight / tomorrow paraphrases", share: 0.2 },
+      { name: "negative-vault carve-outs", rationale: "Spam-classified messages route to never branch", share: 0.15 },
+    ],
+    extract_event_from_message: [
+      { name: "event-type template grid", rationale: "5 event types × 8 phrasings each = 40 anchors", share: 0.35 },
+      { name: "relative date fuzz", rationale: "tomorrow/tonight/next-thursday/in-a-week resolution edge cases", share: 0.3 },
+      { name: "no-event negative", rationale: "Casual messages with no event — must return event_type=none", share: 0.2 },
+      { name: "multi-event injection", rationale: "Messages mentioning 2+ events — picks the most specific", share: 0.15 },
+    ],
+    apply_user_writing_style: [
+      { name: "formal → user-voice rewrite", rationale: "Baseline formal drafts rewritten across user-voice samples", share: 0.5 },
+      { name: "tone calibration", rationale: "Match warmth axis: terse for cold, expressive for warm", share: 0.3 },
+      { name: "doc-grounded persona", rationale: "Real user style excerpts from Vault corpus", share: 0.2 },
+    ],
+    score_relationship_warmth: [
+      { name: "frequency × recency grid", rationale: "msg count × days-since-last-reply combinations", share: 0.4 },
+      { name: "intimacy lexical signals", rationale: "Pet-names, emoji density, callbacks to shared memory", share: 0.3 },
+      { name: "doc-grounded contacts", rationale: "Real Vault contact records (mom, co-founder, client)", share: 0.2 },
+      { name: "edge cases", rationale: "First-time contact, dormant-rebooted, ghosted-then-resumed", share: 0.1 },
+    ],
+    summarize_thread_for_memory: [
+      { name: "thread length grid", rationale: "Short (3-turn) → long (50-turn) thread fixtures", share: 0.4 },
+      { name: "topic diversity", rationale: "Single-topic vs multi-topic threads", share: 0.3 },
+      { name: "sentiment swings", rationale: "Threads that flip sentiment mid-conversation", share: 0.2 },
+      { name: "open-loop detection", rationale: "Threads that end with an unanswered question", share: 0.1 },
     ],
   };
   if (PER_WF[fnName]) return PER_WF[fnName]!;

@@ -63,7 +63,7 @@ async function ensureScan(getState: GetState): Promise<void> {
   if (fx && fx.source === "real") {
     getState().setScan({
       scanned_at: new Date().toISOString(),
-      repo_path: "data/acme-agent",
+      repo_path: "data/folk-agent",
       files_scanned: fx.files.length,
       call_sites: fx.callSites,
       tree_signature: "live",

@@ -69,7 +69,7 @@ async function runTimelineInner(
     // Use the real scanner output stuffed into a ScanReport-shaped doc.
     getState().setScan({
       scanned_at: new Date().toISOString(),
-      repo_path: "data/acme-agent",
+      repo_path: "data/folk-agent",
       files_scanned: fxAvail.files.length,
       call_sites: fxAvail.callSites,
       tree_signature: "live",

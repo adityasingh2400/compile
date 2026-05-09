@@ -1,13 +1,13 @@
 /**
- * Folk — inbound-message pipeline.
+ * Folk - inbound-message pipeline.
  * Five LLM call sites; the hot path that fires on every iMessage.
  *
  * Pattern lifted from Hermes Agent (Nous) + Folk's own dispatcher:
- *   1. classify intent  →  decide if reply needed at all
- *   2. score urgency    →  decide how fast (immediate / soon / today / later)
- *   3. extract event    →  pull flights, meetings, deadlines for cron watchers
- *   4. apply user voice →  rewrite candidate draft in user style
- *   5. draft reply      →  the actual creative generation (frontier-only)
+ *   1. classify intent  ->  decide if reply needed at all
+ *   2. score urgency    ->  decide how fast (immediate / soon / today / later)
+ *   3. extract event    ->  pull flights, meetings, deadlines for cron watchers
+ *   4. apply user voice ->  rewrite candidate draft in user style
+ *   5. draft reply      ->  the actual creative generation (frontier-only)
  */
 import OpenAI from "openai";
 import { z } from "zod";
@@ -15,7 +15,7 @@ import { z } from "zod";
 const client = new OpenAI();
 
 /**
- * GREEN — bounded enum + response_format + zod + temperature 0 + parse.
+ * GREEN - bounded enum + response_format + zod + temperature 0 + parse.
  * Runs on EVERY inbound message. Hottest call site in Folk.
  */
 const MessageIntentSchema = z.object({
@@ -40,7 +40,7 @@ export async function classify_message_intent(text: string) {
 }
 
 /**
- * GREEN — bounded ordinal output, response_format + zod + temperature 0 + parse.
+ * GREEN - bounded ordinal output, response_format + zod + temperature 0 + parse.
  * Decides whether Folk drafts now, batches, or punts to overnight summary.
  */
 const UrgencySchema = z.object({
@@ -65,7 +65,7 @@ export async function score_message_urgency(text: string, sender: string) {
 }
 
 /**
- * YELLOW — has zod schema + response_format + structured parse, but no
+ * YELLOW - has zod schema + response_format + structured parse, but no
  * temperature 0 (defaults to 1). Pulls calendar-relevant events out of
  * inbound messages and feeds them to the cron-watcher pipeline.
  */
@@ -91,7 +91,7 @@ export async function extract_event_from_message(text: string) {
 }
 
 /**
- * RED — temperature 0 but free-form output, no schema, no structured parse.
+ * RED - temperature 0 but free-form output, no schema, no structured parse.
  * Stylistic rewrite of a candidate draft to match the user's voice.
  */
 export async function apply_user_writing_style(draft: string, style_excerpts: string[]) {
@@ -110,7 +110,7 @@ export async function apply_user_writing_style(draft: string, style_excerpts: st
 }
 
 /**
- * RED — pure creative generation, default temperature, prompt assembled
+ * RED - pure creative generation, default temperature, prompt assembled
  * from runtime fragments via string concatenation. THE call site Folk
  * pays the most for; stays at frontier permanently.
  */

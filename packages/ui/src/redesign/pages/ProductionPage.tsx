@@ -191,7 +191,7 @@ function ProductionCanvas({ workflow }: CanvasProps): JSX.Element {
       const h = canvas.clientHeight;
 
       // Trail-decay clear.
-      ctx.fillStyle = "rgba(5, 6, 8, 0.42)";
+      ctx.fillStyle = "rgba(255, 247, 240, 0.45)";
       ctx.fillRect(0, 0, w, h);
 
       // ── Draw edges (faint glow lines).
@@ -207,9 +207,11 @@ function ProductionCanvas({ workflow }: CanvasProps): JSX.Element {
         const c2x = e.c2[0] * w;
         const c2y = e.c2[1] * h;
         const isVault = e.channel === "vault";
+        // Cream backdrop → use maroon for the vault edge (high signal,
+        // dominant path) and a softer warm orange for the frontier edge.
         const stroke = isVault
-          ? "rgba(90, 252, 167, 0.18)"
-          : "rgba(255, 179, 90, 0.16)";
+          ? "rgba(192, 57, 43, 0.32)"
+          : "rgba(255, 159, 67, 0.32)";
         ctx.strokeStyle = stroke;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -217,9 +219,9 @@ function ProductionCanvas({ workflow }: CanvasProps): JSX.Element {
         ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by);
         ctx.stroke();
 
-        // Glow underlay on the vault path (dominant traffic).
+        // Subtle wide-stroke shadow underlay on the vault path.
         if (isVault) {
-          ctx.strokeStyle = "rgba(90, 252, 167, 0.07)";
+          ctx.strokeStyle = "rgba(192, 57, 43, 0.08)";
           ctx.lineWidth = 8;
           ctx.beginPath();
           ctx.moveTo(ax, ay);
@@ -242,7 +244,8 @@ function ProductionCanvas({ workflow }: CanvasProps): JSX.Element {
       }
 
       // ── Step particles + render.
-      ctx.globalCompositeOperation = "lighter";
+      // No additive blending on cream — render in normal alpha mode
+      // with rich maroon (vault) / orange (frontier) ink colors.
       for (const p of particles) {
         if (!p.active) continue;
         const seg = p.path[p.segIndex];
@@ -255,7 +258,6 @@ function ProductionCanvas({ workflow }: CanvasProps): JSX.Element {
           p.active = false;
           continue;
         }
-        // Advance progress (full edge traversal in ~1.4s for vault, slower frontier)
         const baseDuration = 1.4;
         p.t += (dt / baseDuration) * p.speed;
         if (p.t >= 1) {
@@ -287,19 +289,17 @@ function ProductionCanvas({ workflow }: CanvasProps): JSX.Element {
         );
         const isVault = p.channel === "vault";
         const trailColor = isVault
-          ? `rgba(90, 252, 167, 0.95)`
-          : `rgba(255, 179, 90, 0.95)`;
+          ? "rgba(192, 57, 43, 0.95)"
+          : "rgba(255, 159, 67, 0.95)";
         ctx.fillStyle = trailColor;
-        ctx.fillRect(px, py, 2.4, 2.4);
-        // Soft glow
+        ctx.fillRect(px, py, 2.6, 2.6);
         ctx.fillStyle = isVault
-          ? "rgba(90, 252, 167, 0.16)"
-          : "rgba(255, 179, 90, 0.16)";
+          ? "rgba(192, 57, 43, 0.18)"
+          : "rgba(255, 159, 67, 0.18)";
         ctx.beginPath();
         ctx.arc(px, py, 5.5, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.globalCompositeOperation = "source-over";
 
       // ── Draw nodes (over particles).
       drawNodes(ctx, w, h, now);

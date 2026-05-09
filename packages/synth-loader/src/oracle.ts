@@ -83,6 +83,111 @@ export function stubFrontierOutput(
       const tone = String(p.tone ?? TONES[0]!);
       return `[${tone}] introducing ${p.product ?? "our product"} for ${p.audience ?? "you"}.`;
     }
+    /* ── Folk demo ─────────────────────────────────────────────────── */
+    case "classify_message_intent": {
+      const text = String(p.text ?? "");
+      const intent = /\?$|\bcan you\b|\bwhat\b|\bhow\b|\bwhen\b/i.test(text)
+        ? "question"
+        : /\b(meeting|call|dinner|lunch|coffee|tomorrow|tonight|when)\b/i.test(text)
+          ? "logistics"
+          : /\b(love|miss|sorry|hate|hurts|happy|excited)\b/i.test(text)
+            ? "emotional"
+            : /^\s*(hey|hi|hello|yo|sup|wassup)\b/i.test(text)
+              ? "greeting"
+              : /\b(buy|sale|free|click|link|http)\b/i.test(text)
+                ? "spam"
+                : "task";
+      return {
+        intent,
+        requires_reply: intent !== "spam" && intent !== "greeting",
+        confidence: 0.91,
+      };
+    }
+    case "score_message_urgency": {
+      const text = String(p.text ?? "");
+      const urgency = /\?\?|\basap\b|\burgent\b|\btonight\b|\bnow\b/i.test(text)
+        ? "immediate"
+        : /\btomorrow\b|\btoday\b|\bsoon\b/i.test(text)
+          ? "soon"
+          : /\bthis week\b|\beow\b|\bfriday\b/i.test(text)
+            ? "today"
+            : /\bsometime\b|\bwhenever\b|\beventually\b/i.test(text)
+              ? "later"
+              : "soon";
+      return { urgency, reason: `lexical pattern match → ${urgency}`, confidence: 0.88 };
+    }
+    case "extract_event_from_message": {
+      const text = String(p.text ?? "");
+      const eventType = /\bflight\b|\bairport\b|\bairline\b|\bSFO\b|\bJFK\b/i.test(text)
+        ? "flight"
+        : /\bmeeting\b|\bcall\b|\bsync\b|\bzoom\b/i.test(text)
+          ? "meeting"
+          : /\bdeadline\b|\bdue\b|\bby\s+\w+day\b/i.test(text)
+            ? "deadline"
+            : /\bbooked?\b|\breservation\b|\brestaurant\b/i.test(text)
+              ? "booking"
+              : /\b(do|finish|complete|ship|review)\b/i.test(text)
+                ? "task"
+                : "none";
+      const whenMatch =
+        text.match(/\b(tomorrow|tonight|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i)?.[1] ?? null;
+      return {
+        event_type: eventType,
+        when_iso: whenMatch ? whenMatch.toLowerCase() : null,
+        title: eventType === "none" ? null : text.slice(0, 40),
+        participants: [],
+      };
+    }
+    case "apply_user_writing_style": {
+      const draft = String(p.draft ?? "");
+      // Stub stylistic rewrite — keeps output free-form on purpose
+      // (matches the call site's no-schema RED classification).
+      return draft.replace(/\bI am\b/g, "i'm").replace(/\bcannot\b/g, "can't");
+    }
+    case "draft_reply_in_user_voice": {
+      const inbound = String(p.inbound ?? "");
+      // Same: free-form prose. The grade axis catches divergence.
+      return `yeah totally — re: "${inbound.slice(0, 30)}..." how about thursday?`;
+    }
+    case "score_relationship_warmth": {
+      const total = Number(p.total_msgs_30d ?? 0);
+      const warmth = total > 200 ? 5 : total > 80 ? 4 : total > 30 ? 3 : total > 8 ? 2 : 1;
+      return {
+        warmth,
+        axes: {
+          frequency: Math.min(5, total / 40),
+          recency: 4,
+          intimacy: warmth >= 3 ? 4 : 2,
+        },
+        confidence: 0.84,
+      };
+    }
+    case "summarize_thread_for_memory": {
+      const threadParts = (p.thread as string[]) ?? [];
+      const thread = threadParts.join(" ").toLowerCase();
+      const sentiment = /\b(love|happy|excited|great|thank)\b/.test(thread)
+        ? "positive"
+        : /\b(hate|sorry|angry|bad|sad|hurt)\b/.test(thread)
+          ? "negative"
+          : "neutral";
+      return {
+        summary: `Conversation across ${(p.thread as string[])?.length ?? 0} turns.`,
+        topics: thread
+          .split(/\W+/)
+          .filter((w) => w.length > 4)
+          .slice(0, 3),
+        open_loops: [],
+        sentiment,
+      };
+    }
+    case "retrieve_relevant_memory":
+      return `Best match: candidate 0 — most semantically aligned with the inbound query.`;
+    case "infer_relationship_context":
+      return `Long-term close contact; recent thread suggests planning a future meet-up.`;
+    case "summarize_recent_messages": {
+      const msgs = ((p.messages as { from: string; body: string }[]) ?? []).slice(0, 5);
+      return `Caught up with ${msgs.length} senders — mostly logistics and follow-ups.`;
+    }
     default:
       return { echo: payload };
   }

@@ -200,7 +200,7 @@ function DashHeader(): JSX.Element {
       <div className="dash-header-left">
         <span className="dash-brand">compile</span>
         <span className="dash-subtitle">
-          pipeline telemetry · acme/agent
+          pipeline telemetry · folk/agent
           {isLive ? <span className="dash-live-pill">LIVE</span> : null}
         </span>
         <span className="dash-frame-tag">

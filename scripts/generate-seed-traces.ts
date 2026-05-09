@@ -1,7 +1,7 @@
 /**
- * Generate seed proxy traces for the always-on demo.
+ * Generate seed proxy traces for the always-on demo (Folk-themed).
  *
- * Reads the 10 call sites from data/acme-agent/src/, fabricates realistic
+ * Reads the 10 call sites from data/folk-agent/src/, fabricates realistic
  * inputs/outputs per site, spreads timestamps over the last 24h, writes
  * data/proxy-traces.jsonl + data/proxy-traces-summary.json.
  *
@@ -43,225 +43,317 @@ type SiteSpec = {
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 
-const COMPANIES = [
-  "Linear", "Notion", "Ramp", "Mercury", "Brex", "Carta", "Retool", "Vercel",
-  "Modal", "Replicate", "Anyscale", "Pinecone", "Weaviate", "Supabase",
-  "PlanetScale", "Neon", "Turso", "Resend", "Clerk", "Stytch",
-];
-const DOMAINS = COMPANIES.map((c) => `${c.toLowerCase()}.com`);
-const INDUSTRIES = ["fintech", "healthtech", "vertical SaaS", "B2B AI tooling", "devtools"];
+/* ────────────────────────────────────────────────────────────────────
+ * Folk-themed input fixtures.
+ * Real-shaped messages an iMessage/Telegram/Discord agent would see.
+ * ──────────────────────────────────────────────────────────────────── */
 
-const TICKET_BODIES = [
-  "Server returning 502 errors intermittently since 2pm. Affecting checkout flow.",
-  "Cannot reset password — link expires before I click it.",
-  "Billing charged me twice for September. Need refund.",
-  "API rate limit hit at 9am, traffic was below quota. Logs attached.",
-  "Webhook signature validation failing after yesterday's deploy.",
-  "Dashboard shows wrong MRR number — off by ~$4k.",
-  "User invites stuck in pending for 24h, no email delivered.",
-  "Custom domain SSL renewal failed, site is now showing cert warning.",
-  "Export to CSV truncates at 10k rows even on Scale plan.",
-  "OAuth flow loops back to login after Google consent screen.",
-  "Slack integration not posting to channel since Friday.",
-  "Search index missing entries created in the last 6 hours.",
-];
-
-const SENTIMENT_TEXTS = [
-  "honestly the worst onboarding flow I've ever used",
-  "love the new dashboard, way faster than before",
-  "it works but the docs are useless",
-  "team has been responsive, even on weekends — appreciate it",
-  "we're churning, the product hasn't kept up",
-  "saved us probably 30 hours this week alone",
-  "buggy as hell on safari, fix it",
-  "exactly what we needed, signing up the rest of the team",
-  "pricing change felt like a bait and switch",
-  "the new model routing is genuinely impressive",
+const INBOUND_MESSAGES = [
+  "hey can you grab dinner tomorrow night?",
+  "running late, sorry — be there in 20",
+  "did you see the slides?",
+  "love you",
+  "can you review the PR by friday?",
+  "yo what time was the call again",
+  "FREE iPhone — click here to claim now",
+  "wanna grab coffee this week?",
+  "URGENT — staging is down",
+  "happy birthday!! hope it's amazing",
+  "did you book the flight already?",
+  "I need to talk to you about something",
+  "thinking about you, hope you're doing okay",
+  "can we move our 3pm to 4pm?",
+  "the contract should be signed by EOW",
+  "miss you, when are you back?",
+  "lol that meme was great",
+  "just landed, gonna head straight to the office",
+  "need this signed by tonight please",
+  "yo",
+  "hey, free this weekend?",
+  "deadline for the proposal is friday",
+  "booked the restaurant for thursday at 8",
+  "running 5 mins late",
+  "could you send me your address",
 ];
 
-const SKU_QUERIES = [
-  "16 inch macbook pro m4 max 64gb 2tb",
-  "logitech mx master 3s graphite",
-  "standing desk 60x30 walnut",
-  "sony wh-1000xm5 black",
-  "thunderbolt 4 cable 1m",
-  "27 inch 5k display matte",
-  "ergonomic chair lumbar mesh",
-  "usb-c hub 7-in-1 with hdmi",
-  "mechanical keyboard tkl brown switches",
-  "webcam 1080p with ring light",
+const URGENCY_MESSAGES = [
+  "from: mom\ncall me when you can",
+  "from: alex\nURGENT — server down, all hands",
+  "from: sarah\nwanna grab coffee sometime soon?",
+  "from: boss\nneed this by EOD please",
+  "from: friend\nhappy birthday!!",
+  "from: investor\ncan we sync this week?",
+  "from: doctor\nappointment confirmation for tomorrow 10am",
+  "from: school\npicture day is friday",
+  "from: brother\nhey wassup nothing important just checking in",
+  "from: client\nour prod is on fire RIGHT NOW",
+  "from: tinder match\nso what do you do?",
+  "from: gym friend\nyou going tonight?",
 ];
 
-const INVOICE_BODIES = [
-  "INVOICE #ACM-2026-0418\nDate: April 18, 2026\nTotal Due: $4,820.00\nNet 30 terms.",
-  "Acme Corp Invoice\nNumber: INV-77231\nIssued 2026-03-22\nAmount: $1,299.50 USD",
-  "Bill To: Linear\nInvoice ID: ACM-99812\n2026-05-01\nGrand total: $12,400",
-  "Statement #2026-Q1-882\nDated 2026-02-14\nBalance: 8920.00 USD",
-  "Receipt: ACM-RCT-4471 | 2026-04-30 | Total $549.99",
+const EVENT_MESSAGES = [
+  "let's do dinner Thursday at 7",
+  "my flight lands at SFO at 11pm",
+  "deadline for the proposal is Friday",
+  "booked the restaurant for tomorrow at 8",
+  "no plans this weekend, free if you're around",
+  "demo with the team is monday 2pm",
+  "JFK->SFO friday, back monday",
+  "need to ship the v2 launch by tuesday",
+  "anniversary dinner saturday — table for 2",
+  "kid's recital is wednesday at 6",
+  "doctor at 3pm thursday",
 ];
 
-const COMPANY_NAMES_FOR_DOMAIN = [
-  "OpenAI", "Anthropic Inc", "The Hugging Face Company", "Stripe Payments",
-  "Datadog Inc.", "Snowflake Computing", "MongoDB Atlas", "Cloudflare Inc",
+const STYLE_DRAFTS = [
+  "Hello, I am unable to attend the meeting this afternoon.",
+  "Thank you for the invitation. I would be delighted to attend.",
+  "I cannot make it tonight, perhaps another evening.",
+  "Please let me know when you are available next week.",
 ];
 
-const SUPPORT_THREADS = [
-  ["Customer: My export is stuck.", "Agent: Which workspace?", "Customer: acme-prod-2", "Agent: Looking now.", "Agent: Re-queued, should land in 5min."],
-  ["Customer: Webhook signing broke.", "Agent: When did it start?", "Customer: After your friday deploy.", "Agent: Checking changelog."],
-  ["Customer: SSO not working.", "Agent: SAML or OIDC?", "Customer: SAML, Okta.", "Agent: Send me the error from /auth/debug."],
+const DRAFT_INBOUNDS = [
+  "wanna get dinner tonight?",
+  "are you free this weekend",
+  "did you see my last text?",
+  "miss u",
 ];
 
-const EMAIL_DRAFTS = [
-  "hey just wanted to follow up on the demo, did you get a chance to chat with your team about it",
-  "ya so basically we need the contract signed by friday or the procurement window closes",
-  "lol this is the third time the integration broke can someone actually fix it",
+const WARMTH_CONTACTS = [
+  ["mom", 247],
+  ["alex_co_founder", 189],
+  ["sarah_friend", 87],
+  ["client_acme", 32],
+  ["old_school_friend", 11],
+  ["dad", 142],
+  ["partner", 412],
+  ["investor_dan", 28],
+  ["barber", 4],
 ];
 
-const OUTREACH_SIGNALS = [
-  ["Linear", "just raised Series C, hiring 5 SDRs"],
-  ["Notion", "switched from Salesforce to Apollo last quarter"],
-  ["Ramp", "shipped AI bookkeeping feature, GTM team expanding"],
+const THREAD_FIXTURES = [
+  ["alex: figured out the staging bug", "me: nice, what was it", "alex: race condition in the writer", "me: classic ship it"],
+  ["mom: how was your day", "me: good, long", "mom: get some rest sweetie", "me: love you mom"],
+  ["sarah: still on for thursday?", "me: yeah totally", "sarah: 8pm at the new place?", "me: see you then"],
+  ["client: prod is on fire", "me: looking now", "client: what's the eta", "me: 10 min", "me: fixed"],
 ];
 
-const MARKETING_PROMPTS = [
-  ["AI sales copilot", "early-stage founders", "punchy"],
+const RETRIEVE_QUERIES = [
+  "last time I talked to alex about funding",
+  "what did mom say about the family dinner",
+  "what's sarah's restaurant preference again",
+  "remind me what we agreed on the contract",
 ];
+
+const INFER_CONTACTS = [
+  "alex_co_founder",
+  "sarah_friend",
+  "client_acme",
+  "old_school_friend",
+  "mom",
+];
+
+const RECENT_FEEDS = [
+  [
+    { from: "mom", body: "call me when you have time" },
+    { from: "alex", body: "staging is deploying again" },
+    { from: "sarah", body: "dinner thursday?" },
+    { from: "investor", body: "loved the deck" },
+  ],
+];
+
+/* ────────────────────────────────────────────────────────────────────
+ * Site list — 10 call sites mirroring data/folk-agent/src/.
+ *
+ * Counts chosen so:
+ *   3 sites → WILL_COMPILE (>=50)  — show up as tier_1 workflow tabs
+ *   2 sites → BELOW_THRESHOLD (>=20, <50) — tier_2 workflow tabs
+ *   5 sites → FRONTIER_ZONE (<20) — show in audit, never compile
+ * ──────────────────────────────────────────────────────────────────── */
 
 const pick = <T>(arr: T[], i: number): T => arr[i % arr.length]!;
 const jitter = (base: number, spread: number) => base + Math.floor(Math.random() * spread);
 
 const SITES: SiteSpec[] = [
   {
-    fn: "classify_ticket_priority",
-    count: 65, // crosses threshold → compiles live
+    fn: "classify_message_intent",
+    count: 78, // hottest path — every inbound msg fires this
     provider: "openai",
     model: "gpt-5",
-    system: "Classify ticket priority and category. Return JSON.",
-    inputs: TICKET_BODIES,
+    system:
+      "Classify the user's intent in this inbound message. Return JSON {intent, requires_reply, confidence}.",
+    inputs: INBOUND_MESSAGES,
     responder: (text) => {
-      const isHigh = /error|failing|down|stuck|broken|cannot|crash/i.test(text);
-      const cat = /billing|refund|charge|MRR/i.test(text) ? "billing" :
-                  /API|rate|webhook|deploy|index/i.test(text) ? "infrastructure" :
-                  /SSO|password|invite|OAuth|domain|SSL/i.test(text) ? "auth" : "general";
-      return JSON.stringify({ priority: isHigh ? "high" : "medium", category: cat });
+      const isQ = /\?$|\bcan you\b|\bwhat\b|\bhow\b|\bwhen\b|\bwhere\b/i.test(text);
+      const isLog = /\b(meeting|call|dinner|lunch|coffee|tomorrow|tonight|book|flight|deadline)\b/i.test(text);
+      const isEmo = /\b(love|miss|sorry|hate|hurt|happy|excited|birthday|anniversary)\b/i.test(text);
+      const isGreet = /^\s*(hey|hi|hello|yo|sup|wassup)\b/i.test(text) && text.length < 20;
+      const isSpam = /\b(buy|sale|free|click|http|claim)\b/i.test(text);
+      const intent = isSpam ? "spam" : isGreet ? "greeting" : isLog ? "logistics" : isEmo ? "emotional" : isQ ? "question" : "task";
+      return JSON.stringify({
+        intent,
+        requires_reply: intent !== "spam" && intent !== "greeting",
+        confidence: 0.91,
+      });
     },
-    baseLatency: 380,
-    tokenCost: 0.0021,
+    baseLatency: 320,
+    tokenCost: 0.0019,
   },
   {
-    fn: "classify_sentiment",
-    count: 55, // crosses threshold → compiles live
+    fn: "score_message_urgency",
+    count: 62, // fires whenever requires_reply=true (most inbounds)
     provider: "openai",
     model: "gpt-5",
-    system: "Classify sentiment. Return JSON.",
-    inputs: SENTIMENT_TEXTS,
+    system: "Score reply urgency for a personal message. Return JSON {urgency, reason, confidence}.",
+    inputs: URGENCY_MESSAGES,
     responder: (text) => {
-      const pos = /love|appreciate|saved|impressive|exactly|signing/i.test(text);
-      const neg = /worst|useless|churning|bait|buggy|fix it|broke/i.test(text);
-      return JSON.stringify({ sentiment: pos ? "positive" : neg ? "negative" : "neutral", confidence: 0.87 });
+      const isImm = /\bURGENT\b|\bnow\b|\bfire\b|\basap\b/i.test(text);
+      const isSoon = /\btonight\b|\btomorrow\b|\btoday\b|\bsoon\b|\bEOD\b/i.test(text);
+      const isToday = /\bthis week\b|\bfriday\b|\bmonday\b|\bEOW\b/i.test(text);
+      const isLater = /\bsometime\b|\bwhenever\b|\bchecking in\b/i.test(text);
+      const urgency = isImm ? "immediate" : isSoon ? "soon" : isToday ? "today" : isLater ? "later" : "soon";
+      return JSON.stringify({ urgency, reason: `lexical match`, confidence: 0.88 });
     },
-    baseLatency: 210,
-    tokenCost: 0.0014,
+    baseLatency: 280,
+    tokenCost: 0.0017,
   },
   {
-    fn: "match_product_sku",
-    count: 38, // close to threshold but under
-    provider: "openai",
-    model: "gpt-5",
-    system: "Match the query to a SKU from our catalog. Return JSON.",
-    inputs: SKU_QUERIES,
-    responder: (q) => JSON.stringify({ sku: `SKU-${sha(q).slice(0, 6).toUpperCase()}`, match_confidence: 0.91 }),
-    baseLatency: 295,
-    tokenCost: 0.0018,
-  },
-  {
-    fn: "classify_lead_tier",
-    count: 28,
+    fn: "score_relationship_warmth",
+    count: 56, // fires per contact when generating a draft
     provider: "anthropic",
     model: "claude-sonnet-4-6",
-    system: "You are a sales analyst classifying lead tier (A/B/C).",
-    inputs: DOMAINS.flatMap((d, i) =>
-      [50, 120, 240, 480].map((emp) => `Classify ${d} (${emp}-person ${pick(INDUSTRIES, i)}). Return JSON.`)
-    ),
+    system:
+      "You score the warmth of a personal relationship. Return JSON {warmth (1-5), axes:{frequency, recency, intimacy}, confidence}.",
+    inputs: WARMTH_CONTACTS.map(([id, n]) => `Contact ${id}, ${n} msgs in last 30d.`),
     responder: (q) => {
-      const m = q.match(/\((\d+)-person/);
-      const emp = m ? +m[1]! : 100;
-      const tier = emp >= 50 && emp <= 500 ? "A" : emp <= 2000 ? "B" : "C";
-      return JSON.stringify({ fit: tier !== "C", confidence: 0.82, tier, reasoning: `${emp}-person fits ${tier}-tier band.` });
+      const m = q.match(/(\d+)\s+msgs/);
+      const n = m ? +m[1]! : 30;
+      const w = n > 200 ? 5 : n > 80 ? 4 : n > 30 ? 3 : n > 8 ? 2 : 1;
+      return JSON.stringify({
+        warmth: w,
+        axes: { frequency: Math.min(5, n / 40), recency: 4, intimacy: w >= 3 ? 4 : 2 },
+        confidence: 0.84,
+      });
     },
-    baseLatency: 520,
-    tokenCost: 0.0034,
+    baseLatency: 510,
+    tokenCost: 0.0033,
   },
   {
-    fn: "extract_invoice_fields",
-    count: 22,
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    system: "Extract invoice_number, total_usd (number), and date (YYYY-MM-DD).",
-    inputs: INVOICE_BODIES,
-    responder: (body) => {
-      const num = body.match(/(?:#|Number:|ID:|Statement #|Receipt:)\s*([A-Z0-9-]+)/)?.[1] ?? "UNKNOWN";
-      const total = +(body.match(/[\$]?([\d,]+\.\d{2}|\d+)/g)?.slice(-1)[0]?.replace(/[$,]/g, "") ?? 0);
-      const date = body.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? "2026-01-01";
-      return JSON.stringify({ invoice_number: num, total_usd: total, date });
-    },
-    baseLatency: 610,
-    tokenCost: 0.0042,
-  },
-  {
-    fn: "summarize_support_thread",
-    count: 18, // yellow zone
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    system: "Summarize this support thread in 3 bullets.",
-    inputs: SUPPORT_THREADS.map((t) => t.join("\n---\n")),
-    responder: () => "- Customer reported issue with workspace tooling\n- Agent diagnosed root cause from logs\n- Fix queued, ETA under 5 minutes",
-    baseLatency: 890,
-    tokenCost: 0.0067,
-  },
-  {
-    fn: "resolve_company_domain",
-    count: 12,
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    system: "Resolve a company name to its primary domain. Return only the domain.",
-    inputs: COMPANY_NAMES_FOR_DOMAIN,
-    responder: (name) => `${name.toLowerCase().replace(/[^a-z]/g, "").slice(0, 12)}.com`,
-    baseLatency: 240,
-    tokenCost: 0.0009,
-  },
-  {
-    fn: "rewrite_email_formal",
-    count: 8,
+    fn: "extract_event_from_message",
+    count: 38, // fires on ~50% of inbounds (logistics/task class)
     provider: "openai",
     model: "gpt-5",
-    system: "Rewrite in formal business English.",
-    inputs: EMAIL_DRAFTS,
-    responder: () => "Following up on the demo discussion. Could you share an update on whether your team has had the opportunity to evaluate the proposal? Happy to provide additional context if useful.",
-    baseLatency: 740,
-    tokenCost: 0.0051,
+    system:
+      "Extract any time-bound event from this message. Return JSON {event_type, when_iso, title, participants}.",
+    inputs: EVENT_MESSAGES,
+    responder: (text) => {
+      const t = /\bflight\b|\bSFO\b|\bJFK\b|\bairport\b/i.test(text)
+        ? "flight"
+        : /\bmeeting\b|\bcall\b|\bsync\b|\bdemo\b/i.test(text)
+          ? "meeting"
+          : /\bdeadline\b|\bship\b|\bdue\b/i.test(text)
+            ? "deadline"
+            : /\bdinner\b|\brestaurant\b|\bbooked\b|\btable\b/i.test(text)
+              ? "booking"
+              : /\bship\b|\bpicture\b|\brecital\b|\bdoctor\b/i.test(text)
+                ? "task"
+                : "none";
+      const w = text.match(/\b(tomorrow|tonight|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i)?.[1]?.toLowerCase() ?? null;
+      return JSON.stringify({
+        event_type: t,
+        when_iso: w,
+        title: t === "none" ? null : text.slice(0, 40),
+        participants: [],
+      });
+    },
+    baseLatency: 360,
+    tokenCost: 0.0024,
   },
   {
-    fn: "draft_outreach_subject",
-    count: 3, // red zone, frontier-only
+    fn: "summarize_thread_for_memory",
+    count: 26, // fires once per closed thread
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    system:
+      "Summarize this thread for long-term memory. Return JSON {summary, topics, open_loops, sentiment}.",
+    inputs: THREAD_FIXTURES.map((t) => t.join("\n---\n")),
+    responder: (thread) => {
+      const sent = /\b(love|happy|nice|sweetie)\b/i.test(thread)
+        ? "positive"
+        : /\b(fire|bug|down|hate)\b/i.test(thread)
+          ? "negative"
+          : "neutral";
+      return JSON.stringify({
+        summary: "Conversation across multiple turns covering one main topic.",
+        topics: ["follow-up", "logistics"],
+        open_loops: [],
+        sentiment: sent,
+      });
+    },
+    baseLatency: 720,
+    tokenCost: 0.0049,
+  },
+  {
+    fn: "apply_user_writing_style",
+    count: 18, // yellow zone — fires when draft refinement triggers
+    provider: "openai",
+    model: "gpt-5",
+    system: "Rewrite the candidate draft in the user's voice based on the style excerpts.",
+    inputs: STYLE_DRAFTS,
+    responder: (d) =>
+      d
+        .replace(/\bI am\b/g, "i'm")
+        .replace(/\bcannot\b/g, "can't")
+        .replace(/^([A-Z])/, (c) => c.toLowerCase()),
+    baseLatency: 680,
+    tokenCost: 0.0046,
+  },
+  {
+    fn: "retrieve_relevant_memory",
+    count: 12, // wide variance, frontier-only
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    system: "Pick the most relevant memory for the inbound query. Explain your choice.",
+    inputs: RETRIEVE_QUERIES,
+    responder: () =>
+      "Best match: candidate 0 — most semantically aligned with the inbound query and most recent in time window.",
+    baseLatency: 880,
+    tokenCost: 0.0061,
+  },
+  {
+    fn: "infer_relationship_context",
+    count: 7, // frontier-only
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     system: "",
-    inputs: OUTREACH_SIGNALS.map(([n, s]) => `Write a punchy outreach subject for ${n} given signal: ${s}`),
-    responder: () => "Linear's SDR push — got 60s?",
-    baseLatency: 480,
-    tokenCost: 0.0028,
+    inputs: INFER_CONTACTS.map((c) => `Infer the user's relationship context with ${c}.`),
+    responder: () =>
+      "Long-term close contact; recent thread suggests collaborative dynamic with ongoing planning around a future meet-up. Tone is relaxed, low-stakes.",
+    baseLatency: 1080,
+    tokenCost: 0.0078,
   },
   {
-    fn: "generate_marketing_copy",
-    count: 1, // truly frontier
+    fn: "summarize_recent_messages",
+    count: 4, // frontier-only — morning summary cron
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    system: "",
+    inputs: RECENT_FEEDS.map((f) => f.map((m) => `${m.from}: ${m.body}`).join("\n")),
+    responder: () =>
+      "Caught up with 4 senders this morning — mostly logistics (alex on staging, sarah on dinner) plus a check-in from mom. Nothing urgent, no replies overdue.",
+    baseLatency: 1140,
+    tokenCost: 0.0084,
+  },
+  {
+    fn: "draft_reply_in_user_voice",
+    count: 2, // pure creative — TRULY frontier-only, never compiled
     provider: "openai",
     model: "gpt-5",
     system: "",
-    inputs: MARKETING_PROMPTS.map(([p, a, t]) => `Write ${t} marketing copy for ${p} targeting ${a}.`),
-    responder: () => "Stop guessing which leads to call. Acme reads every signal — funding, headcount, job posts — and tells you who's ready to buy this week. Built for founders who'd rather close than research.",
-    baseLatency: 1240,
-    tokenCost: 0.0089,
+    inputs: DRAFT_INBOUNDS.map((m) => `Draft a reply to: "${m}"`),
+    responder: () => "yeah totally — thursday at 8 work for you?",
+    baseLatency: 1320,
+    tokenCost: 0.0094,
   },
 ];
 
@@ -278,7 +370,7 @@ function generate(): Trace[] {
       const response = site.responder(userPrompt);
       traces.push({
         ts,
-        call_site_hash: `acme:${site.fn}:v1`,
+        call_site_hash: `folk:${site.fn}:v1`,
         model: site.model,
         provider: site.provider,
         system_prompt: site.system,
@@ -292,7 +384,6 @@ function generate(): Trace[] {
     }
   }
 
-  // chronological order (matches what a real proxy would write)
   return traces.sort((a, b) => a.ts.localeCompare(b.ts));
 }
 
@@ -312,10 +403,12 @@ function main() {
     total_traces: traces.length,
     threshold: 50,
     buckets: Object.fromEntries(
-      Object.entries(buckets).sort(([, a], [, b]) => b - a).map(([k, v]) => [
-        k,
-        { count: v, status: v >= 50 ? "WILL_COMPILE" : v >= 20 ? "BELOW_THRESHOLD" : "FRONTIER_ZONE" },
-      ])
+      Object.entries(buckets)
+        .sort(([, a], [, b]) => b - a)
+        .map(([k, v]) => [
+          k,
+          { count: v, status: v >= 50 ? "WILL_COMPILE" : v >= 20 ? "BELOW_THRESHOLD" : "FRONTIER_ZONE" },
+        ])
     ),
     spend_usd: +traces.reduce((s, t) => s + t.cost_usd, 0).toFixed(2),
     timespan_hours: 24,
