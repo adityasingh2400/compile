@@ -42,7 +42,10 @@ async function main(): Promise<void> {
 
   // ── Phase 2: RealTensorlakeClient.runEmittedFunction ────────────────────
   console.log("[smoke/2] gate path — emitting + running agent function in sandbox...");
-  const client = new RealTensorlakeClient();
+  const client = new RealTensorlakeClient({
+    phiImage: process.env.COMPILE_PHI_IMAGE ?? "compile-phi-mini",
+    phiModel: process.env.COMPILE_PHI_MODEL ?? "phi3:mini",
+  });
   try {
     const code = `
       export function classify_priority(input) {
@@ -76,6 +79,22 @@ async function main(): Promise<void> {
     console.log(`[smoke/2] gate score: ${correct}/${holdout.length} = ${((correct / holdout.length) * 100).toFixed(0)}%`);
     if (correct !== holdout.length) throw new Error("phase 2 gate mismatch — emitted fn returned wrong outputs");
     console.log("[smoke/2] PASS");
+
+    // ── Phase 3: runPhi against real ollama in Tensorlake ────────────────
+    if (process.env.COMPILE_SKIP_PHI === "1") {
+      console.log("[smoke/3] skipped (COMPILE_SKIP_PHI=1)");
+    } else {
+      console.log("[smoke/3] tier-2 path — runPhi against ollama-in-Tensorlake (warming sandbox + model)...");
+      const phiPrompt = "You classify support tickets. Output a JSON object with key `priority` set to one of: high, medium, low.";
+      const phiInput = { text: "Server is on fire. Customers cannot log in." };
+      const tp = performance.now();
+      const phi = await client.runPhi({ prompt: phiPrompt, input: phiInput });
+      const phiElapsed = performance.now() - tp;
+      console.log(`[smoke/3] runPhi returned in ${phiElapsed.toFixed(0)}ms (phi.latency_ms=${phi.latency_ms.toFixed(0)})`);
+      console.log(`[smoke/3] output:`, JSON.stringify(phi.output));
+      if (phi.output == null) throw new Error("phase 3 output null");
+      console.log("[smoke/3] PASS");
+    }
   } finally {
     await client.close();
   }
