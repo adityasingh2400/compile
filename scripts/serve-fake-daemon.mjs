@@ -31,8 +31,39 @@
 
 import http from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
+import { ConvexHttpClient } from "convex/browser";
 
 const PORT = Number(process.env.PORT ?? 8421);
+const CONVEX_URL = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
+const CONVEX_RUN_ID = process.env.CONVEX_RUN_ID ?? "demo-fake-daemon";
+const convex = CONVEX_URL ? new ConvexHttpClient(CONVEX_URL) : null;
+if (convex) {
+  console.log(`[fake-daemon] convex sink: ${CONVEX_URL} (run_id=${CONVEX_RUN_ID})`);
+} else {
+  console.log("[fake-daemon] CONVEX_URL not set — skipping convex mirror");
+}
+
+/** Fire-and-forget Convex mutation. We never block the demo on Convex. */
+function convexCall(name, args) {
+  if (!convex) return;
+  convex.mutation(name, args).catch((err) => {
+    console.warn(`[fake-daemon] convex ${name} failed:`, err.message ?? err);
+  });
+}
+
+const PHASE_TIMELINE = [
+  { phase: "connect", page_index: 0 },
+  { phase: "reading_code", page_index: 1 },
+  { phase: "classify", page_index: 2 },
+  { phase: "reading_docs", page_index: 3 },
+  { phase: "expanding", page_index: 4 },
+  { phase: "stress_test", page_index: 5 },
+  { phase: "clusters_revealed", page_index: 6 },
+  { phase: "agent_writing", page_index: 7 },
+  { phase: "validate", page_index: 8 },
+  { phase: "vault_write", page_index: 9 },
+  { phase: "result", page_index: 10 },
+];
 const FIRE_INTERVAL_MS = Number(process.env.FIRE_INTERVAL_S ?? 45) * 1000;
 const COLD_START_HOURS = Number(process.env.COLD_START_HOURS ?? 7);
 const COLD_START_FIRES = 4;
@@ -208,6 +239,21 @@ async function fanOutFire() {
   }
   totalRetries += retryCount;
 
+  // Mirror live throughput into Convex live_metrics so subscribers see it.
+  convexCall("metrics:put", {
+    metrics: {
+      run_id: CONVEX_RUN_ID,
+      call_site_id: cluster.id,
+      total_done: total,
+      oracle_done: 1000,
+      candidate_done: total - 1000,
+      throughput_per_sec: 3500,
+      tier_mix: { tier_1: 0.7, tier_2: 0.25, tier_3: 0.05 },
+      axis_scores: { schema_stability: 0.97, determinism: 0.94, oracle_agreement: 0.96 },
+      updated_at: isoNow(),
+    },
+  });
+
   // Occasional fallback engagement to demonstrate recovery. fanOutFire()
   // runs only on even cycles (2, 4, 6, 8 …) so we trigger every cycle
   // whose counter is divisible by 4 — that's every other fan-out, ~150s
@@ -250,6 +296,42 @@ async function fanOutFire() {
     tier: "tier_1",
     fallback_count: didFallback ? 1 : 0,
   });
+
+  // Mirror the fire-complete into Convex: a vault_event + bumped result_summary.
+  convexCall("vault:event", {
+    event: {
+      run_id: CONVEX_RUN_ID,
+      entry: {
+        kind: "positive",
+        vault_key: `vault://folk/${cluster.fn}_v1`,
+        cluster_id: cluster.id,
+        function_name: cluster.fn,
+        tier: "tier_1",
+        dollars_saved_this_fire: dollarsThis,
+        compiled_at: isoNow(),
+      },
+      emitted_at: isoNow(),
+    },
+  });
+  convexCall("result:put", {
+    summary: {
+      run_id: CONVEX_RUN_ID,
+      files_scanned: 47,
+      call_sites_total: 10,
+      stage1_green: 2,
+      stage1_yellow: 3,
+      stage1_red: 5,
+      stage2_runs: firesTotal,
+      stage2_passes: firesTotal,
+      codified_count: firesTotal,
+      negative_vault_count: 6,
+      projected_annual_savings_usd: dollarsSaved,
+      sandbox_compute_cost_usd: Math.round(firesTotal * 28),
+      total_synthetic_calls: firesTotal * 100_000,
+      wall_time_ms: Date.now() - startedAt,
+      emitted_at: isoNow(),
+    },
+  });
 }
 
 async function vaultHitFire() {
@@ -290,6 +372,22 @@ async function vaultHitFire() {
     tier: "tier_1",
     fallback_count: 0,
   });
+
+  convexCall("vault:event", {
+    event: {
+      run_id: CONVEX_RUN_ID,
+      entry: {
+        kind: "vault_hit",
+        vault_key: `vault://folk/${cluster.fn}_v3`,
+        cluster_id: cluster.id,
+        function_name: cluster.fn,
+        inherited_from_session: cluster.inherited_from_session,
+        dollars_saved_this_fire: dollarsThis,
+        emitted_at: isoNow(),
+      },
+      emitted_at: isoNow(),
+    },
+  });
 }
 
 async function uptimeLoop() {
@@ -304,6 +402,41 @@ async function uptimeLoop() {
     });
     await sleep(1000);
   }
+}
+
+async function bootstrapConvex() {
+  if (!convex) return;
+  // Walk the phase timeline (fast) so any UI subscribed to bootstrap_phase
+  // flips through the demo and lands on `result`. Phase mutation is
+  // forward-only so we just advance to the terminal state on boot.
+  for (const step of PHASE_TIMELINE) {
+    convexCall("phase:advance", {
+      run_id: CONVEX_RUN_ID,
+      phase: step.phase,
+      page_index: step.page_index,
+    });
+  }
+  // Initial result summary so subscribers have something to render before
+  // the first fan-out fire writes a real one.
+  convexCall("result:put", {
+    summary: {
+      run_id: CONVEX_RUN_ID,
+      files_scanned: 47,
+      call_sites_total: 10,
+      stage1_green: 2,
+      stage1_yellow: 3,
+      stage1_red: 5,
+      stage2_runs: firesTotal,
+      stage2_passes: firesTotal,
+      codified_count: firesTotal,
+      negative_vault_count: 6,
+      projected_annual_savings_usd: dollarsSaved,
+      sandbox_compute_cost_usd: firesTotal * 28,
+      total_synthetic_calls: firesTotal * 100_000,
+      wall_time_ms: Date.now() - startedAt,
+      emitted_at: isoNow(),
+    },
+  });
 }
 
 async function fireLoop() {
@@ -354,5 +487,6 @@ server.listen(PORT, () => {
   console.log(`[fake-daemon] fire interval: ${FIRE_INTERVAL_MS / 1000}s · alternates fan-out / vault-hit`);
 });
 
+bootstrapConvex();
 uptimeLoop().catch((err) => console.error("[fake-daemon] uptime loop crashed:", err));
 fireLoop().catch((err) => console.error("[fake-daemon] fire loop crashed:", err));
