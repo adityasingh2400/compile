@@ -2,11 +2,17 @@ import { useEffect, useRef } from "react";
 import { useStore } from "../store.js";
 import { HERO_CALL_SITE_ID } from "../demo/fixtures.js";
 
-function heroName(state: ReturnType<typeof useStore.getState>): string {
-  const fx = state.fixtures;
-  const id = fx?.heroCallSiteId ?? HERO_CALL_SITE_ID;
-  const site = state.callSites.find((c) => c.call_site_id === id);
-  return site?.function_hint ?? id.split(":")[1] ?? id;
+function useHeroName(): string {
+  return useStore((s) => {
+    const id = s.fixtures?.heroCallSiteId ?? HERO_CALL_SITE_ID;
+    // Look in both store callSites (timeline-seeded) and fixtures.callSites
+    // (snapshot-loaded) so the hero name resolves regardless of which lane
+    // got there first.
+    const sites =
+      s.callSites.length > 0 ? s.callSites : s.fixtures?.callSites ?? [];
+    const site = sites.find((c) => c.call_site_id === id);
+    return site?.function_hint ?? id.split(":")[1] ?? id;
+  });
 }
 
 const NARRATIONS = [
@@ -25,6 +31,7 @@ const NARRATIONS = [
 
 export function StressTestPage(): JSX.Element {
   const live = useStore((s) => s.liveMetrics);
+  const heroName = useHeroName();
   const startedAt = useRef(performance.now());
   const narrationRef = useRef<HTMLDivElement>(null);
 
@@ -59,7 +66,7 @@ export function StressTestPage(): JSX.Element {
     <div className="overlay-root">
       <div className="const-chrome-tl">
         <div>
-          <b>{heroName(useStore.getState())}</b>
+          <b>{heroName}</b>
         </div>
         <div>predicted Tier 1 · schema-prior 0.92</div>
       </div>
