@@ -15,16 +15,76 @@
  * back to a generic set if no keyword matches.
  */
 
+/**
+ * Author metadata shown in the node hover + click detail. Optional —
+ * inferred from the label when not authored.
+ */
+export interface SampleAuthor {
+  name: string;
+  handle?: string;
+  /** Two-letter avatar initials (auto-derived from name if absent). */
+  initials?: string;
+  /** Hue used for the avatar disc (`maroon` / `coral` / `orange` / etc.). */
+  hue?: "maroon" | "coral" | "orange" | "ink";
+}
+
+/**
+ * Field row rendered in the node-detail overlay. Each row is a small
+ * mono `key` paired with a value (string or short JSON).
+ */
+export interface SampleFieldRow {
+  key: string;
+  value: string;
+  /** When true, render the value in a slightly larger mono block
+   *  (used for the raw caption / message body). */
+  block?: boolean;
+}
+
+/**
+ * Full interaction detail for one synthetic call. Hand-authored where
+ * the demo benefits, otherwise auto-filled from the deriver.
+ */
+export interface SampleDetail {
+  /** Who the post / message / contact came from. */
+  author?: SampleAuthor;
+  /** Human readable when ("2h ago", "yesterday"). */
+  posted_at?: string;
+  /** Provider context shown subtly ("instagram", "imessage"). */
+  source?: string;
+  /** Ordered list of input rows passed to the LLM. */
+  input: SampleFieldRow[];
+  /** Ordered list of output rows the LLM (or codified handler) returned. */
+  output: SampleFieldRow[];
+  /** Match path: how Compile served this call in production. */
+  match_type?:
+    | "deterministic vault hit"
+    | "fuzzy vault hit"
+    | "tier-2 phi-3-mini"
+    | "frontier fallback";
+  /** Confidence on the codified handler's output (0..1). */
+  confidence?: number;
+  /** Frontier model originally serving this call. */
+  frontier_model?: string;
+  frontier_latency_ms?: number;
+  frontier_cost_usd?: number;
+  /** Vault path served via Compile. */
+  vault_latency_ms?: number;
+  vault_cost_usd?: number;
+}
+
 export interface SyntheticSample {
   /** Short imperative phrase displayed next to the node. */
   label: string;
   /** Sub-cluster slug — drives node hue + grouping. */
   cluster: string;
+  /** Rich interaction detail. Optional — `inferSampleDetail` fills
+   *  in plausible values when this is omitted. */
+  detail?: SampleDetail;
 }
 
 interface SamplePack {
   /** Cluster slug → human label. */
-  clusters: { slug: string; label: string }[];
+  clusters: { slug: string; label: string; description?: string }[];
   samples: SyntheticSample[];
 }
 
@@ -351,4 +411,431 @@ export function getSamplePack(functionName: string): SamplePack {
     if (entry.match(functionName)) return entry.pack;
   }
   return FALLBACK_PACK;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Detail deriver — synthesizes plausible interaction data from
+// (function_name + cluster + label). Each workflow kind maps to a
+// builder that returns:
+//
+//   - input: the structured shape passed to the LLM (caption + meta)
+//   - output: the parsed JSON the codified handler returns
+//   - match_type: which path served this in production
+//   - latency / cost numbers for the frontier vs vault comparison
+//
+// The deriver is deterministic: same (fn, label, cluster) → same
+// detail. The author / handle is hashed off the label so the same
+// "Sarah Chen · location" always shows Sarah Chen.
+//
+// When a sample carries an authored `detail` (richer copy from the
+// data agent), the deriver is bypassed.
+
+const FIRST_NAMES = [
+  "Sarah", "Marcus", "Yusuke", "Camila", "Ravi", "Priya", "Liam", "Hana",
+  "Jenny", "Alex", "Nora", "David", "Elena", "Chen", "Maya", "Jordan",
+  "Aria", "Tomás", "Zoe", "Theo", "Imani", "Devi", "Olu", "Rin",
+];
+const LAST_NAMES = [
+  "Chen", "Rodriguez", "Watanabe", "Santos", "Iyer", "Sharma", "Walsh",
+  "Lee", "Patel", "Tanaka", "Bennett", "Kim", "Park", "Garcia", "Singh",
+  "Nguyen", "Cohen", "Adler", "O'Connor", "Müller",
+];
+
+/** djb2-style hash → small positive integer; deterministic on string. */
+function hashStr(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function pickFromArray<T>(arr: T[], seed: number): T {
+  return arr[seed % arr.length] as T;
+}
+
+function deriveAuthor(label: string): SampleAuthor {
+  // If the label already contains a "Name · …" or "Name —" form,
+  // reuse that. Otherwise hash an author from FIRST/LAST.
+  const nameMatch = label.match(/^([A-Z][a-zà-ÿ]+(?:\s[A-Z][a-zà-ÿ]+)?)\s*[·—-]/);
+  const fromLabel = nameMatch?.[1];
+  const seed = hashStr(label);
+  const first = fromLabel ?? `${pickFromArray(FIRST_NAMES, seed)} ${pickFromArray(LAST_NAMES, seed >> 3)}`;
+  const handle = "@" + first.toLowerCase().replace(/[^a-z]/g, "");
+  const initials = first
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]!)
+    .join("")
+    .toUpperCase();
+  const hueChoices: SampleAuthor["hue"][] = ["maroon", "coral", "orange", "ink"];
+  const hue = hueChoices[seed % hueChoices.length];
+  return { name: first, handle, initials, hue };
+}
+
+function pickPostedAt(seed: number, cluster: string): string {
+  // Cluster-aware: stale clusters get older timestamps, live clusters get fresh.
+  if (/stale|throwback|drop/i.test(cluster)) {
+    return pickFromArray(
+      ["8mo ago", "1y ago", "2y ago", "18mo ago", "3y ago"],
+      seed,
+    );
+  }
+  if (/live|fresh|p0|urgent/i.test(cluster)) {
+    return pickFromArray(["just now", "5m ago", "12m ago", "30m ago", "1h ago"], seed);
+  }
+  if (/recent|p1|today/i.test(cluster)) {
+    return pickFromArray(["2h ago", "4h ago", "8h ago", "yesterday", "1d ago"], seed);
+  }
+  if (/dormant/i.test(cluster)) {
+    return pickFromArray(["120d ago", "180d ago", "300d ago", "1y ago"], seed);
+  }
+  return pickFromArray(["2d ago", "5d ago", "1w ago", "2w ago", "3w ago"], seed);
+}
+
+interface DerivedShape {
+  source: string;
+  input: SampleFieldRow[];
+  output: SampleFieldRow[];
+  matchType: SampleDetail["match_type"];
+  confidence: number;
+  frontierModel: string;
+  frontierLatency: number;
+  frontierCost: number;
+  vaultLatency: number;
+  vaultCost: number;
+}
+
+function buildLocationShape(label: string, cluster: string, seed: number): DerivedShape {
+  const us = ["us_cities"].includes(cluster);
+  const asia = cluster.startsWith("asia");
+  const eu = cluster.startsWith("europe");
+  const transit = cluster === "in_transit";
+  const stale = cluster === "throwback_stale";
+  const city = transit
+    ? pickFromArray(["SFO", "LAX", "JFK", "LHR", "HND"], seed)
+    : us
+      ? pickFromArray(["New York", "San Francisco", "Los Angeles", "Austin", "Miami", "Venice Beach"], seed)
+      : asia
+        ? pickFromArray(["Tokyo", "Shanghai", "Seoul", "Shibuya"], seed)
+        : eu
+          ? pickFromArray(["Berlin", "Amsterdam", "Paris", "Lisbon", "London"], seed)
+          : pickFromArray(["Unknown", "—", null as unknown as string], seed) ?? "Unknown";
+  const country = us ? "US" : asia ? pickFromArray(["JP", "CN", "KR"], seed) : eu ? pickFromArray(["DE", "FR", "PT", "GB", "NL"], seed) : "—";
+  const conf = stale ? 0.42 : transit ? 0.78 : 0.94;
+  return {
+    source: "instagram",
+    input: [
+      { key: "caption", value: `"${label}"`, block: true },
+      { key: "geotag", value: stale ? "(none)" : pickFromArray(["📍 SFO", "📍 venice beach", "📍 shibuya, tokyo", "📍 la condesa, mx", "(none)"], seed) },
+      { key: "media_type", value: pickFromArray(["photo", "carousel", "reel"], seed) },
+    ],
+    output: [
+      { key: "city", value: stale ? "null" : `"${city}"` },
+      { key: "country", value: stale ? "null" : `"${country}"` },
+      { key: "neighborhood", value: cluster === "us_cities" && city === "San Francisco" ? '"soma"' : "null" },
+      { key: "confidence", value: conf.toFixed(2) },
+    ],
+    matchType: stale ? "frontier fallback" : transit ? "fuzzy vault hit" : "deterministic vault hit",
+    confidence: conf,
+    frontierModel: "gpt-5",
+    frontierLatency: 380 + (seed % 220),
+    frontierCost: 0.0024,
+    vaultLatency: stale ? 0 : 1 + (seed % 3),
+    vaultCost: stale ? 0 : 0.0001,
+  };
+}
+
+function buildActivityShape(label: string, cluster: string, seed: number): DerivedShape {
+  const map: Record<string, { activity: string; category: string; professional: boolean }> = {
+    shipping: { activity: "shipping a release", category: "professional · launch", professional: true },
+    speaking: { activity: "speaking · panel", category: "professional · public", professional: true },
+    career_move: { activity: "changing roles", category: "professional · career", professional: true },
+    fundraising: { activity: "fundraising", category: "professional · raise", professional: true },
+    personal_milestone: { activity: "personal milestone", category: "personal · life event", professional: false },
+    training: { activity: "training", category: "personal · fitness", professional: false },
+  };
+  const m = map[cluster] ?? { activity: "unknown", category: "—", professional: false };
+  return {
+    source: "instagram",
+    input: [
+      { key: "caption", value: `"${label}"`, block: true },
+      { key: "media_type", value: pickFromArray(["photo", "reel", "story"], seed) },
+      { key: "hashtags", value: pickFromArray(["#shipit", "#building", "#raising", "#sxsw", "(none)"], seed) },
+    ],
+    output: [
+      { key: "activity", value: `"${m.activity}"` },
+      { key: "category", value: `"${m.category}"` },
+      { key: "professional", value: String(m.professional) },
+      { key: "confidence", value: "0.93" },
+    ],
+    matchType: "deterministic vault hit",
+    confidence: 0.93,
+    frontierModel: "gpt-5",
+    frontierLatency: 410 + (seed % 200),
+    frontierCost: 0.0026,
+    vaultLatency: 1,
+    vaultCost: 0.0001,
+  };
+}
+
+function buildRecencyShape(label: string, cluster: string, seed: number): DerivedShape {
+  const ageMap: Record<string, { recency: string; stale: boolean; conf: number }> = {
+    live: { recency: "live", stale: false, conf: 0.99 },
+    recent: { recency: "recent", stale: false, conf: 0.96 },
+    this_month: { recency: "this_month", stale: false, conf: 0.92 },
+    stale_throwback: { recency: "stale", stale: true, conf: 0.97 },
+  };
+  const m = ageMap[cluster] ?? ageMap.recent!;
+  const tsMatch = label.match(/posted\s+([^·]+)·/);
+  const captionMatch = label.match(/·\s+"([^"]+)"/);
+  const posted = tsMatch?.[1]?.trim() ?? "—";
+  const caption = captionMatch?.[1] ?? label;
+  return {
+    source: "instagram",
+    input: [
+      { key: "posted_at", value: posted },
+      { key: "caption", value: `"${caption}"`, block: true },
+    ],
+    output: [
+      { key: "recency", value: `"${m.recency}"` },
+      { key: "stale", value: String(m.stale) },
+      { key: "confidence", value: m.conf.toFixed(2) },
+    ],
+    matchType: "deterministic vault hit",
+    confidence: m.conf,
+    frontierModel: "gpt-5",
+    frontierLatency: 280 + (seed % 120),
+    frontierCost: 0.0018,
+    vaultLatency: 0,
+    vaultCost: 0.00005,
+  };
+}
+
+function buildSourceRouterShape(label: string, cluster: string, seed: number): DerivedShape {
+  const map: Record<string, { sources: string[]; priority: string[] }> = {
+    location_intent: {
+      sources: ["instagram", "find_my", "google_maps"],
+      priority: ["instagram", "find_my", "google_maps"],
+    },
+    activity_intent: { sources: ["instagram", "twitter", "linkedin"], priority: ["instagram", "twitter", "linkedin"] },
+    contact_intent: { sources: ["icloud", "email_finder"], priority: ["icloud", "email_finder"] },
+    recent_post_intent: { sources: ["instagram", "twitter", "tiktok"], priority: ["instagram", "twitter", "tiktok"] },
+    employment_intent: { sources: ["linkedin", "crunchbase"], priority: ["linkedin", "crunchbase"] },
+  };
+  const m = map[cluster] ?? map.location_intent!;
+  const personMatch = label.match(/^(.+?)\s+·\s+(.+)$/);
+  const person = personMatch?.[1] ?? "Unknown";
+  const intent = personMatch?.[2] ?? "lookup";
+  return {
+    source: "internal_router",
+    input: [
+      { key: "person", value: `"${person}"` },
+      { key: "intent", value: `"${intent}"` },
+    ],
+    output: [
+      { key: "sources", value: `[${m.sources.map((s) => `"${s}"`).join(", ")}]` },
+      { key: "priority_order", value: `[${m.priority.slice(0, 2).map((s) => `"${s}"`).join(", ")} …]` },
+      { key: "skip_reason", value: "null" },
+    ],
+    matchType: "tier-2 phi-3-mini",
+    confidence: 0.88,
+    frontierModel: "claude-sonnet-4-6",
+    frontierLatency: 540 + (seed % 280),
+    frontierCost: 0.0078,
+    vaultLatency: 50 + (seed % 30),
+    vaultCost: 0.0001,
+  };
+}
+
+function buildHandleShape(label: string, cluster: string, seed: number): DerivedShape {
+  const variants: Record<string, { ig: string; tw: string; li: string; conf: number }> = {
+    fullname_clean: { ig: "@sarah.chen", tw: "@sarahc", li: "/in/sarahchen", conf: 0.92 },
+    abbreviated: { ig: "@s.chen", tw: "@schen", li: "/in/sarahchen", conf: 0.74 },
+    underscore_handle: { ig: `@${label}`, tw: `@${label.replace(/_/g, "")}`, li: `/in/${label.replace(/_/g, "")}`, conf: 0.81 },
+    single_word: { ig: "(ambiguous)", tw: "(ambiguous)", li: "(ambiguous)", conf: 0.4 },
+  };
+  const m = variants[cluster] ?? variants.fullname_clean!;
+  return {
+    source: "internal_normalize",
+    input: [{ key: "name", value: `"${label}"`, block: true }],
+    output: [
+      { key: "instagram", value: `"${m.ig}"` },
+      { key: "twitter", value: `"${m.tw}"` },
+      { key: "linkedin", value: `"${m.li}"` },
+      { key: "confidence", value: m.conf.toFixed(2) },
+    ],
+    matchType: cluster === "single_word" ? "frontier fallback" : "deterministic vault hit",
+    confidence: m.conf,
+    frontierModel: "gpt-5",
+    frontierLatency: 320 + (seed % 100),
+    frontierCost: 0.002,
+    vaultLatency: cluster === "single_word" ? 0 : 1,
+    vaultCost: cluster === "single_word" ? 0 : 0.00005,
+  };
+}
+
+function buildIntentShape(label: string, cluster: string, seed: number): DerivedShape {
+  const map: Record<string, string> = {
+    scheduling: "scheduling",
+    urgent: "urgent_escalation",
+    warmth: "warmth_personal",
+    logistics: "logistics_checkin",
+    noise: "noise_spam",
+  };
+  const intent = map[cluster] ?? "unknown";
+  return {
+    source: "imessage",
+    input: [{ key: "message", value: `"${label}"`, block: true }],
+    output: [
+      { key: "intent", value: `"${intent}"` },
+      { key: "confidence", value: "0.95" },
+    ],
+    matchType: cluster === "noise" ? "deterministic vault hit" : "fuzzy vault hit",
+    confidence: 0.95,
+    frontierModel: "gpt-5",
+    frontierLatency: 240 + (seed % 120),
+    frontierCost: 0.0014,
+    vaultLatency: 1,
+    vaultCost: 0.00004,
+  };
+}
+
+function buildUrgencyShape(label: string, cluster: string, seed: number): DerivedShape {
+  const tier = cluster.toUpperCase();
+  const score = cluster === "p0" ? 0.98 : cluster === "p1" ? 0.78 : cluster === "p2" ? 0.45 : 0.12;
+  return {
+    source: "imessage",
+    input: [{ key: "message", value: `"${label}"`, block: true }],
+    output: [
+      { key: "urgency", value: `"${tier}"` },
+      { key: "score", value: score.toFixed(2) },
+      { key: "confidence", value: "0.93" },
+    ],
+    matchType: "deterministic vault hit",
+    confidence: 0.93,
+    frontierModel: "gpt-5",
+    frontierLatency: 220 + (seed % 100),
+    frontierCost: 0.0012,
+    vaultLatency: 1,
+    vaultCost: 0.00004,
+  };
+}
+
+function buildWarmthShape(label: string, cluster: string, seed: number): DerivedShape {
+  const score = cluster === "inner" ? 0.95 : cluster === "active" ? 0.72 : cluster === "ambient" ? 0.38 : 0.08;
+  return {
+    source: "imessage",
+    input: [{ key: "contact", value: `"${label}"`, block: true }],
+    output: [
+      { key: "warmth", value: score.toFixed(2) },
+      { key: "bucket", value: `"${cluster}"` },
+      { key: "confidence", value: "0.92" },
+    ],
+    matchType: "deterministic vault hit",
+    confidence: 0.92,
+    frontierModel: "claude-sonnet-4-6",
+    frontierLatency: 510 + (seed % 200),
+    frontierCost: 0.005,
+    vaultLatency: 1,
+    vaultCost: 0.00004,
+  };
+}
+
+function buildEventShape(label: string, cluster: string, seed: number): DerivedShape {
+  return {
+    source: "imessage",
+    input: [{ key: "message", value: `"${label}"`, block: true }],
+    output: [
+      { key: "event_type", value: `"${cluster}"` },
+      { key: "when", value: pickFromArray(["friday 17:00", "tuesday 12:00", "saturday 20:00", "thursday 14:00"], seed) },
+      { key: "confidence", value: "0.91" },
+    ],
+    matchType: "fuzzy vault hit",
+    confidence: 0.91,
+    frontierModel: "gpt-5",
+    frontierLatency: 360 + (seed % 140),
+    frontierCost: 0.002,
+    vaultLatency: 2,
+    vaultCost: 0.00006,
+  };
+}
+
+function buildGenericShape(label: string, cluster: string, seed: number): DerivedShape {
+  return {
+    source: "internal",
+    input: [{ key: "input", value: `"${label}"`, block: true }],
+    output: [
+      { key: "label", value: `"${cluster}"` },
+      { key: "confidence", value: "0.9" },
+    ],
+    matchType: "deterministic vault hit",
+    confidence: 0.9,
+    frontierModel: "gpt-5",
+    frontierLatency: 300 + (seed % 200),
+    frontierCost: 0.0018,
+    vaultLatency: 1,
+    vaultCost: 0.00005,
+  };
+}
+
+const SHAPE_BUILDERS: { match: (fn: string) => boolean; build: typeof buildGenericShape }[] = [
+  { match: (fn) => /location.*post|extract.*location/i.test(fn), build: buildLocationShape },
+  { match: (fn) => /activity.*post|extract.*activity/i.test(fn), build: buildActivityShape },
+  { match: (fn) => /post.*recency|recency.*post|fresh|stale/i.test(fn), build: buildRecencyShape },
+  { match: (fn) => /route.*source|route.*lookup|source.*route/i.test(fn), build: buildSourceRouterShape },
+  { match: (fn) => /normalize.*handle|handle.*normalize/i.test(fn), build: buildHandleShape },
+  { match: (fn) => /classify.*intent|intent.*class/i.test(fn), build: buildIntentShape },
+  { match: (fn) => /urgency|priority/i.test(fn), build: buildUrgencyShape },
+  { match: (fn) => /warmth|relationship/i.test(fn), build: buildWarmthShape },
+  { match: (fn) => /event|calendar/i.test(fn), build: buildEventShape },
+];
+
+/**
+ * Returns the rich SampleDetail for a sample, hand-authored or derived.
+ *
+ * The other agent on the team is iterating on the perfect mock data —
+ * when they author `sample.detail`, this function returns it verbatim.
+ * Until then it produces deterministic, plausible interaction data.
+ */
+export function inferSampleDetail(
+  functionName: string,
+  sample: SyntheticSample,
+): SampleDetail {
+  if (sample.detail) return sample.detail;
+
+  const seed = hashStr(`${functionName}:${sample.label}:${sample.cluster}`);
+  const builder =
+    SHAPE_BUILDERS.find((b) => b.match(functionName))?.build ?? buildGenericShape;
+  const shape = builder(sample.label, sample.cluster, seed);
+
+  return {
+    author: deriveAuthor(sample.label),
+    posted_at: pickPostedAt(seed, sample.cluster),
+    source: shape.source,
+    input: shape.input,
+    output: shape.output,
+    match_type: shape.matchType,
+    confidence: shape.confidence,
+    frontier_model: shape.frontierModel,
+    frontier_latency_ms: shape.frontierLatency,
+    frontier_cost_usd: shape.frontierCost,
+    vault_latency_ms: shape.vaultLatency,
+    vault_cost_usd: shape.vaultCost,
+  };
+}
+
+/**
+ * Cluster description lookup — used by the cluster-zoom panel to
+ * explain "what makes a node belong here". Defaults to a derived
+ * one-liner if the pack didn't author it.
+ */
+export function getClusterDescription(
+  pack: SamplePack,
+  clusterSlug: string,
+): string {
+  const c = pack.clusters.find((x) => x.slug === clusterSlug);
+  if (c?.description) return c.description;
+  // Fallback heuristic — count + cluster label.
+  const count = pack.samples.filter((s) => s.cluster === clusterSlug).length;
+  const label = c?.label ?? clusterSlug;
+  return `${count} synthetic call${count === 1 ? "" : "s"} matched the ${label} pattern.`;
 }

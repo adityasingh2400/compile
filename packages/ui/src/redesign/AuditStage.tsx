@@ -32,7 +32,22 @@ import {
   CODIFIABLE_WORKFLOWS,
   type Workflow,
 } from "../data/workflows.js";
-import { getSamplePack } from "./synthetic-call-samples.js";
+import {
+  getClusterDescription,
+  getSamplePack,
+  inferSampleDetail,
+  type SampleDetail,
+} from "./synthetic-call-samples.js";
+
+// Pulled into module scope so the cluster + node detail overlays
+// can format costs / latencies cheaply.
+const fmtUsd = (n: number): string => {
+  if (n === 0) return "$0";
+  if (n < 0.001) return `$${n.toFixed(5)}`;
+  if (n < 1) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
+};
+const fmtMs = (n: number): string => (n < 1 ? "<1 ms" : `${Math.round(n)} ms`);
 
 const REPO_DISPLAY = "nozomio/personal-agent";
 
@@ -79,15 +94,20 @@ async function runAuditTimeline(): Promise<void> {
   await sleep(420);
 
   // FILTERING — synthetic calls fan out (visual is driven from
-  // the node enumerator below; we just hold this phase long enough
-  // for the columns to fully emit + cycle a few active labels)
+  // the node enumerator below; we hold this phase long enough for
+  // the columns to fully emit + cycle a few active labels)
   s().setAuditPhase("filtering");
   s().setFiltered(true);
   await sleep(8200);
 
-  // MANIFEST — settle, summarize
+  // MANIFEST — settle, summarize. We park here so judges can hover
+  // / click any node and inspect the simulated interaction. The
+  // workspace transition is operator-driven (Enter / →) from this
+  // point.
   s().setAuditPhase("manifest");
-  await sleep(3200);
+  // Auto-advance after a generous window so the demo still flows
+  // even if nobody touches the keyboard.
+  await sleep(45_000);
 
   // TRANSITION → WORKSPACE
   s().setAuditPhase("transition");
@@ -291,6 +311,12 @@ interface WorkflowColumnProps {
   reveal: boolean;
   /** When true, animate nodes (during filtering / manifest phases). */
   emit: boolean;
+  /** Selected cluster slug (when focused) or null (overview). */
+  focusedCluster: string | null;
+  /** Whether *some* workflow has a focused cluster (used to dim siblings). */
+  anyFocused: boolean;
+  onFocusCluster(clusterSlug: string | null): void;
+  onOpenNode(nodeIdx: number): void;
 }
 
 function WorkflowColumn({
@@ -298,6 +324,10 @@ function WorkflowColumn({
   index,
   reveal,
   emit,
+  focusedCluster,
+  anyFocused,
+  onFocusCluster,
+  onOpenNode,
 }: WorkflowColumnProps): JSX.Element {
   const pack = useMemo(() => getSamplePack(workflow.function_name), [workflow.function_name]);
   const placements = useMemo(
@@ -306,13 +336,18 @@ function WorkflowColumn({
   );
 
   // Number of nodes currently visible — emits one every 110ms while
-  // `emit` is true.
+  // `emit` is true. Once a cluster is focused, all nodes are forced
+  // visible so the user can hover/click any of them.
   const [visible, setVisible] = useState(0);
   useEffect(() => {
+    if (focusedCluster) {
+      setVisible(placements.length);
+      return;
+    }
     if (!emit) return;
     let cancelled = false;
     const start = performance.now();
-    const STAGGER = 90 + index * 25; // staggered fan-out across columns
+    const STAGGER = 90 + index * 25;
     const tick = (now: number): void => {
       if (cancelled) return;
       const n = Math.min(
@@ -326,27 +361,40 @@ function WorkflowColumn({
     return () => {
       cancelled = true;
     };
-  }, [emit, placements.length, index]);
+  }, [emit, placements.length, index, focusedCluster]);
 
   // Active node — cycles through visible nodes; its label streams
-  // into the headline above the column.
+  // into the headline above the column. Pauses while a cluster is
+  // focused so it doesn't fight with the hover state.
   const [activeIdx, setActiveIdx] = useState(0);
   useEffect(() => {
     if (visible === 0) return;
+    if (focusedCluster) return;
     const interval = window.setInterval(() => {
       setActiveIdx((i) => (i + 1) % visible);
     }, 720);
     return () => window.clearInterval(interval);
-  }, [visible]);
+  }, [visible, focusedCluster]);
+
+  // Hover state — which node the user is pointing at, and screen
+  // coords for the floating tooltip.
+  const [hover, setHover] = useState<{
+    nodeIdx: number;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const activeSample = visible > 0 ? placements[activeIdx % visible] : null;
 
   const yearly = workflow.monthly_calls * workflow.per_call_cost_usd * 12;
   const tierLabel = workflow.tier === "tier_2" ? "tier 2 · phi-3-mini" : "tier 1 · vault";
+  const dimmed = anyFocused && focusedCluster == null;
 
   return (
     <div
-      className={`audit-org-wf ${reveal ? "is-revealed" : ""} ${workflow.tier}`}
+      className={`audit-org-wf ${reveal ? "is-revealed" : ""} ${workflow.tier} ${
+        focusedCluster ? "has-focus" : ""
+      } ${dimmed ? "is-dimmed" : ""}`}
       style={{ ["--wf-delay" as never]: `${index * 140}ms` }}
     >
       <div className="audit-org-wf-meta">
@@ -384,22 +432,21 @@ function WorkflowColumn({
         </span>
       </div>
 
-      <div className="audit-org-wf-canvas">
+      <div
+        className={`audit-org-wf-canvas ${focusedCluster ? "is-focused" : ""}`}
+        onMouseLeave={() => setHover(null)}
+      >
         {/* soft halo — pure aesthetic, no border */}
         <div className="audit-org-wf-halo" aria-hidden />
 
-        {/* Cluster tags float at the edge of the canvas. */}
+        {/* Cluster tags float at each wedge centroid. Click to zoom. */}
         {pack.clusters.map((c, ci) => {
-          // Place each tag near the centroid of nodes in that cluster
-          // so the tag visually belongs to its wedge. Pre-compute
-          // cluster center from placements.
           const clusterNodes = placements.filter((p) => p.cluster === c.slug);
           if (clusterNodes.length === 0) return null;
           const cx =
             clusterNodes.reduce((acc, n) => acc + n.x, 0) / clusterNodes.length;
           const cy =
             clusterNodes.reduce((acc, n) => acc + n.y, 0) / clusterNodes.length;
-          // Push tag slightly outward from the centroid for legibility.
           const dx = cx - 0.5;
           const dy = cy - 0.5;
           const len = Math.max(0.02, Math.hypot(dx, dy));
@@ -409,45 +456,138 @@ function WorkflowColumn({
             const idx = placements.indexOf(n);
             return idx < visible;
           }).length;
+          const isFocus = focusedCluster === c.slug;
+          const isFaded = focusedCluster != null && !isFocus;
           return (
-            <div
+            <button
               key={c.slug}
-              className="audit-org-cluster-tag"
+              type="button"
+              className={`audit-org-cluster-tag ${isFocus ? "is-focus" : ""} ${
+                isFaded ? "is-faded" : ""
+              }`}
               style={{
                 left: `${tx * 100}%`,
                 top: `${ty * 100}%`,
                 ["--cluster-delay" as never]: `${ci * 220 + 600}ms`,
-                opacity: visibleCount > 0 ? 1 : 0,
+                opacity: visibleCount > 0 ? undefined : 0,
               }}
               data-cluster={c.slug}
+              onClick={(e) => {
+                e.stopPropagation();
+                onFocusCluster(isFocus ? null : c.slug);
+              }}
+              aria-label={`${isFocus ? "Exit" : "Focus"} cluster: ${c.label}`}
             >
               <span className="audit-org-cluster-label">{c.label}</span>
               <span className="audit-org-cluster-share">
                 {visibleCount}/{clusterNodes.length}
               </span>
-            </div>
+            </button>
           );
         })}
 
         {placements.map((p, i) => {
           const isVisible = i < visible;
-          const isActive = activeSample === p;
+          const isActive = activeSample === p && !focusedCluster;
+          const isFocusCluster = focusedCluster === p.cluster;
+          const isFadedNode = focusedCluster != null && !isFocusCluster;
+          // When a cluster is focused, scale-out its nodes so they're
+          // easier to hover/click. We apply this via a CSS variable so
+          // the radius push is GPU-cheap (transform).
+          const focusBoost = isFocusCluster ? 1.35 : 1;
           return (
             <div
               key={i}
-              className={`audit-org-node ${isVisible ? "is-visible" : ""} ${isActive ? "is-active" : ""}`}
+              className={`audit-org-node ${isVisible ? "is-visible" : ""} ${
+                isActive ? "is-active" : ""
+              } ${isFocusCluster ? "is-focus" : ""} ${
+                isFadedNode ? "is-faded" : ""
+              }`}
               style={{
-                left: `${p.x * 100}%`,
-                top: `${p.y * 100}%`,
+                left: `${50 + (p.x - 0.5) * 100 * focusBoost}%`,
+                top: `${50 + (p.y - 0.5) * 100 * focusBoost}%`,
                 ["--node-delay" as never]: `${i * 18}ms`,
               }}
               data-cluster={p.cluster}
+              onMouseEnter={(e) => {
+                if (!isVisible) return;
+                if (isFadedNode) return;
+                setHover({
+                  nodeIdx: i,
+                  x: e.clientX,
+                  y: e.clientY,
+                });
+              }}
+              onMouseMove={(e) => {
+                if (!isVisible) return;
+                if (isFadedNode) return;
+                setHover({
+                  nodeIdx: i,
+                  x: e.clientX,
+                  y: e.clientY,
+                });
+              }}
+              onClick={(e) => {
+                if (!isVisible || isFadedNode) return;
+                e.stopPropagation();
+                onOpenNode(i);
+              }}
+              role="button"
+              tabIndex={isVisible && !isFadedNode ? 0 : -1}
+              aria-label={`Open synthetic call: ${p.label}`}
             >
               <span className="audit-org-node-dot" aria-hidden />
               <span className="audit-org-node-label">{p.label}</span>
             </div>
           );
         })}
+
+        {/* Floating hover tooltip — quick preview, click for full detail */}
+        {hover && (() => {
+          const sample = pack.samples.find(
+            (s) => s.label === placements[hover.nodeIdx]?.label,
+          );
+          if (!sample) return null;
+          const detail = inferSampleDetail(workflow.function_name, sample);
+          // Tooltip is fixed-positioned to viewport coords. Nudge so it
+          // stays on-screen near the right/bottom edges.
+          const tipX = Math.min(window.innerWidth - 320, hover.x + 14);
+          const tipY = Math.min(window.innerHeight - 220, hover.y + 14);
+          return (
+            <div
+              className="audit-org-hover-tip"
+              style={{ left: tipX, top: tipY }}
+              role="tooltip"
+            >
+              <div className="audit-org-hover-head">
+                {detail.author ? (
+                  <span className={`audit-org-hover-avatar hue-${detail.author.hue ?? "maroon"}`}>
+                    {detail.author.initials}
+                  </span>
+                ) : null}
+                <div className="audit-org-hover-id">
+                  <span className="audit-org-hover-name">
+                    {detail.author?.name ?? "synthetic call"}
+                  </span>
+                  <span className="audit-org-hover-meta">
+                    {detail.author?.handle ? `${detail.author.handle} · ` : ""}
+                    {detail.posted_at ?? ""}
+                    {detail.source ? ` · ${detail.source}` : ""}
+                  </span>
+                </div>
+              </div>
+              <div className="audit-org-hover-quote">"{sample.label}"</div>
+              <div className="audit-org-hover-foot">
+                <span className="audit-org-hover-match">{detail.match_type}</span>
+                <span className="audit-org-hover-sep">·</span>
+                <span>frontier {fmtMs(detail.frontier_latency_ms ?? 0)}</span>
+                <span className="audit-org-hover-arrow">→</span>
+                <span className="audit-org-hover-vault">vault {fmtMs(detail.vault_latency_ms ?? 0)}</span>
+              </div>
+              <div className="audit-org-hover-cta">click for full interaction →</div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -479,18 +619,370 @@ function WorkflowGrid(): JSX.Element {
     return out;
   }, [classified]);
 
+  // Cross-workflow selection state. Driven from this parent so:
+  //   · clicking a cluster in workflow A dims workflow B's clusters
+  //   · the cluster-zoom side panel + node-detail overlay can read
+  //     the same selection without prop-drilling deep
+  const [focused, setFocused] = useState<{
+    workflowId: string;
+    cluster: string;
+  } | null>(null);
+  const [openNode, setOpenNode] = useState<{
+    workflowId: string;
+    nodeIdx: number;
+  } | null>(null);
+
+  // ESC closes the most-specific overlay first, then unfocuses.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      if (openNode) {
+        e.preventDefault();
+        setOpenNode(null);
+      } else if (focused) {
+        e.preventDefault();
+        setFocused(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openNode, focused]);
+
+  // The cluster-focus side rail dispatches a CustomEvent when the
+  // user picks one of its synthetic-call rows; route that through
+  // to setOpenNode here so the rail doesn't need to know about
+  // the parent state shape.
+  useEffect(() => {
+    const onPick = (e: Event): void => {
+      const detail = (e as CustomEvent<{ workflowId: string; nodeIdx: number }>)
+        .detail;
+      if (!detail) return;
+      setOpenNode({ workflowId: detail.workflowId, nodeIdx: detail.nodeIdx });
+    };
+    window.addEventListener("audit-org:open-node", onPick);
+    return () => window.removeEventListener("audit-org:open-node", onPick);
+  }, []);
+
   const emit = phase === "filtering" || phase === "manifest" || phase === "transition";
 
   if (identifiedWorkflows.length === 0) return <></>;
 
+  const focusedWorkflow = focused
+    ? identifiedWorkflows.find((w) => w.id === focused.workflowId) ?? null
+    : null;
+  const openWorkflow = openNode
+    ? identifiedWorkflows.find((w) => w.id === openNode.workflowId) ?? null
+    : null;
+
   return (
-    <div
-      className={`audit-org-grid wf-count-${identifiedWorkflows.length}`}
-      data-phase={phase}
-    >
-      {identifiedWorkflows.map((wf, i) => (
-        <WorkflowColumn key={wf.id} workflow={wf} index={i} reveal emit={emit} />
-      ))}
+    <>
+      <div
+        className={`audit-org-grid wf-count-${identifiedWorkflows.length} ${
+          focused ? "has-focus" : ""
+        }`}
+        data-phase={phase}
+        onClick={(e) => {
+          // Click outside any node/tag clears the selection.
+          if (e.target === e.currentTarget && focused) {
+            setFocused(null);
+          }
+        }}
+      >
+        {identifiedWorkflows.map((wf, i) => (
+          <WorkflowColumn
+            key={wf.id}
+            workflow={wf}
+            index={i}
+            reveal
+            emit={emit}
+            focusedCluster={focused?.workflowId === wf.id ? focused.cluster : null}
+            anyFocused={focused != null}
+            onFocusCluster={(cluster) =>
+              setFocused(cluster ? { workflowId: wf.id, cluster } : null)
+            }
+            onOpenNode={(nodeIdx) =>
+              setOpenNode({ workflowId: wf.id, nodeIdx })
+            }
+          />
+        ))}
+      </div>
+
+      {focusedWorkflow && focused ? (
+        <ClusterFocusOverlay
+          workflow={focusedWorkflow}
+          clusterSlug={focused.cluster}
+          onClose={() => setFocused(null)}
+        />
+      ) : null}
+
+      {openWorkflow && openNode ? (
+        <NodeDetailOverlay
+          workflow={openWorkflow}
+          nodeIdx={openNode.nodeIdx}
+          onClose={() => setOpenNode(null)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Cluster focus overlay — slides in from the right as a side rail.
+// Pure type, no panel border. Lists characteristics + the synthetic
+// calls in this cluster, each clickable to open the node detail.
+
+function ClusterFocusOverlay({
+  workflow,
+  clusterSlug,
+  onClose,
+}: {
+  workflow: Workflow;
+  clusterSlug: string;
+  onClose(): void;
+}): JSX.Element {
+  const pack = useMemo(() => getSamplePack(workflow.function_name), [workflow.function_name]);
+  const cluster = pack.clusters.find((c) => c.slug === clusterSlug);
+  const samples = useMemo(
+    () => pack.samples.filter((s) => s.cluster === clusterSlug),
+    [pack.samples, clusterSlug],
+  );
+  if (!cluster) return <></>;
+
+  const description = getClusterDescription(pack, clusterSlug);
+
+  return (
+    <aside className="audit-org-cluster-focus" role="dialog" aria-modal="false">
+      <header className="audit-org-cluster-focus-head">
+        <div className="audit-org-cluster-focus-eyebrow">
+          {workflow.display_name} · cluster
+        </div>
+        <h3 className="audit-org-cluster-focus-name">{cluster.label}</h3>
+        <p className="audit-org-cluster-focus-desc">{description}</p>
+        <div className="audit-org-cluster-focus-stats">
+          <span>
+            <em>{samples.length}</em> synthetic calls
+          </span>
+          <span className="sep">·</span>
+          <span>
+            <em>
+              {((samples.length / pack.samples.length) * 100).toFixed(0)}%
+            </em>{" "}
+            of fan-out
+          </span>
+        </div>
+        <button
+          type="button"
+          className="audit-org-cluster-focus-close"
+          onClick={onClose}
+          aria-label="Close cluster focus"
+        >
+          ×
+        </button>
+      </header>
+
+      <div className="audit-org-cluster-focus-list-label">
+        click any to inspect the simulated interaction
+      </div>
+      <ul className="audit-org-cluster-focus-list">
+        {samples.map((s) => {
+          const detail = inferSampleDetail(workflow.function_name, s);
+          // Find this sample's index in pack.samples so the parent
+          // can open it consistently.
+          const nodeIdx = pack.samples.findIndex(
+            (p) => p === s || (p.label === s.label && p.cluster === s.cluster),
+          );
+          return (
+            <li key={`${s.label}::${s.cluster}`}>
+              <button
+                type="button"
+                className="audit-org-cluster-focus-item"
+                onClick={() => {
+                  // Defer opening through a custom event so the
+                  // overlay state lives on WorkflowGrid; we surface
+                  // it via a window CustomEvent. Simpler: re-route
+                  // through a query param? No — just call onClose
+                  // and let user click in the canvas. Better: emit
+                  // a window event that WorkflowGrid listens for.
+                  window.dispatchEvent(
+                    new CustomEvent("audit-org:open-node", {
+                      detail: { workflowId: workflow.id, nodeIdx },
+                    }),
+                  );
+                }}
+              >
+                <span className={`audit-org-cluster-focus-avatar hue-${detail.author?.hue ?? "maroon"}`}>
+                  {detail.author?.initials ?? "··"}
+                </span>
+                <div className="audit-org-cluster-focus-item-text">
+                  <span className="audit-org-cluster-focus-item-quote">
+                    "{s.label}"
+                  </span>
+                  <span className="audit-org-cluster-focus-item-meta">
+                    {detail.author?.name ?? ""}
+                    {detail.posted_at ? ` · ${detail.posted_at}` : ""}
+                    {detail.source ? ` · ${detail.source}` : ""}
+                  </span>
+                </div>
+                <span className="audit-org-cluster-focus-item-arrow">→</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </aside>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Node detail overlay — full screen-ish reveal of a single synthetic
+// call's complete interaction. Cream backdrop blur over the audit
+// behind, no rectangular panel — just type laid out.
+
+function NodeDetailOverlay({
+  workflow,
+  nodeIdx,
+  onClose,
+}: {
+  workflow: Workflow;
+  nodeIdx: number;
+  onClose(): void;
+}): JSX.Element {
+  const pack = useMemo(() => getSamplePack(workflow.function_name), [workflow.function_name]);
+  const sample = pack.samples[nodeIdx];
+  if (!sample) return <></>;
+
+  const detail = inferSampleDetail(workflow.function_name, sample);
+  const cluster = pack.clusters.find((c) => c.slug === sample.cluster);
+
+  const speedup =
+    detail.vault_latency_ms && detail.frontier_latency_ms
+      ? Math.max(1, detail.frontier_latency_ms / Math.max(1, detail.vault_latency_ms))
+      : null;
+  const savingsPct =
+    detail.frontier_cost_usd && detail.frontier_cost_usd > 0
+      ? Math.max(
+          0,
+          (1 - (detail.vault_cost_usd ?? 0) / detail.frontier_cost_usd) * 100,
+        )
+      : null;
+
+  return (
+    <div className="audit-org-node-detail" role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className="audit-org-node-detail-inner"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="audit-org-node-detail-close"
+          onClick={onClose}
+          aria-label="Close detail"
+        >
+          ×
+        </button>
+
+        <div className="audit-org-node-detail-eyebrow">
+          {workflow.display_name}
+          {cluster ? (
+            <>
+              <span className="sep">·</span>
+              <span className="audit-org-node-detail-cluster">{cluster.label}</span>
+            </>
+          ) : null}
+          <span className="sep">·</span>
+          <span>simulated call</span>
+        </div>
+
+        <div className="audit-org-node-detail-author">
+          {detail.author ? (
+            <span
+              className={`audit-org-node-detail-avatar hue-${detail.author.hue ?? "maroon"}`}
+            >
+              {detail.author.initials}
+            </span>
+          ) : null}
+          <div className="audit-org-node-detail-author-text">
+            <span className="audit-org-node-detail-name">
+              {detail.author?.name ?? "synthetic call"}
+            </span>
+            <span className="audit-org-node-detail-handle">
+              {detail.author?.handle ?? ""}
+              {detail.posted_at ? ` · ${detail.posted_at}` : ""}
+              {detail.source ? ` · ${detail.source}` : ""}
+            </span>
+          </div>
+        </div>
+
+        <h2 className="audit-org-node-detail-quote">"{sample.label}"</h2>
+
+        <div className="audit-org-node-detail-grid">
+          <div className="audit-org-node-detail-col">
+            <div className="audit-org-node-detail-col-eyebrow">input</div>
+            <dl className="audit-org-node-detail-fields">
+              {detail.input.map((row) => (
+                <div key={row.key} className={`row ${row.block ? "is-block" : ""}`}>
+                  <dt>{row.key}</dt>
+                  <dd>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <div className="audit-org-node-detail-col">
+            <div className="audit-org-node-detail-col-eyebrow">codified output</div>
+            <dl className="audit-org-node-detail-fields">
+              {detail.output.map((row) => (
+                <div key={row.key} className={`row ${row.block ? "is-block" : ""}`}>
+                  <dt>{row.key}</dt>
+                  <dd className="is-output">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </div>
+
+        <div className="audit-org-node-detail-compare">
+          <div className="cmp-col">
+            <div className="cmp-col-eyebrow">frontier (before)</div>
+            <div className="cmp-col-model">{detail.frontier_model ?? "gpt-5"}</div>
+            <div className="cmp-col-stat">
+              <em>{fmtMs(detail.frontier_latency_ms ?? 0)}</em> latency
+            </div>
+            <div className="cmp-col-stat">
+              <em>{fmtUsd(detail.frontier_cost_usd ?? 0)}</em> per call
+            </div>
+          </div>
+          <div className="cmp-arrow" aria-hidden>→</div>
+          <div className="cmp-col is-vault">
+            <div className="cmp-col-eyebrow">compile (after)</div>
+            <div className="cmp-col-model">{detail.match_type ?? "vault"}</div>
+            <div className="cmp-col-stat">
+              <em>{fmtMs(detail.vault_latency_ms ?? 0)}</em> latency
+            </div>
+            <div className="cmp-col-stat">
+              <em>{fmtUsd(detail.vault_cost_usd ?? 0)}</em> per call
+            </div>
+          </div>
+          <div className="cmp-summary">
+            {speedup ? (
+              <span>
+                <em>{speedup.toFixed(0)}×</em> faster
+              </span>
+            ) : null}
+            {savingsPct != null ? (
+              <span>
+                <em>{savingsPct.toFixed(1)}%</em> cheaper
+              </span>
+            ) : null}
+            <span>
+              <em>{((detail.confidence ?? 0) * 100).toFixed(0)}%</em> confidence
+            </span>
+          </div>
+        </div>
+
+        <div className="audit-org-node-detail-hint">
+          press <kbd>Esc</kbd> or click outside to close
+        </div>
+      </div>
     </div>
   );
 }
