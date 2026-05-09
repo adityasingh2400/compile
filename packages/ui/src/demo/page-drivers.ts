@@ -173,11 +173,24 @@ async function ensureCells(getState: GetState): Promise<void> {
 }
 
 async function ensureAgentCode(getState: GetState): Promise<void> {
-  if (getState().agentCodeFull) return; // already populated
-  // Run the typewriter
+  const cur = getState();
+  // If the agent code is already fully revealed, no-op.
+  if (cur.agentCodeFull && cur.agentCodeRevealed >= cur.agentCodeFull.length) {
+    return;
+  }
   const full = DEMO_AGENT_CODE;
+  // If we're not currently on the agent_writing phase, the user is past
+  // it — just snap the code to fully revealed so the dashboard's codegen
+  // panel shows the finished function (matches the rest of the
+  // post-bootstrap state being already filled in).
+  if (cur.phase !== "agent_writing") {
+    getState().setAgentCode(full, full.length);
+    return;
+  }
+  // Otherwise we're live on the agent_writing phase — run the typewriter
+  // animation so a judge watching gets the moment.
   getState().setAgentCode(full, 0);
-  await sleep(2400); // wait for envelope to fly
+  await sleep(2400);
   const totalChars = full.length;
   const totalMs = 18_000;
   const charsPerTick = Math.ceil(totalChars / (totalMs / 16));
@@ -186,7 +199,12 @@ async function ensureAgentCode(getState: GetState): Promise<void> {
     revealed = Math.min(totalChars, revealed + charsPerTick);
     getState().setAgentCode(full, revealed);
     await sleep(16);
-    if (getState().phase !== "agent_writing") return; // user jumped away
+    // If the user jumps away, snap to fully revealed and exit so the
+    // panel doesn't get stuck halfway.
+    if (getState().phase !== "agent_writing") {
+      getState().setAgentCode(full, full.length);
+      return;
+    }
   }
 }
 
