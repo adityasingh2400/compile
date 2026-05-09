@@ -19,6 +19,12 @@ import {
   NoopBootstrapStream,
   type IBootstrapStream,
 } from "@compile/stream";
+import {
+  LocalFakeTensorlakeClient,
+  RealTensorlakeClient,
+  TensorlakeWithLocalFallback,
+  type ITensorlakeClient,
+} from "@compile/runtime";
 import { MemoryRequestStore } from "./store.js";
 import {
   buildHandlers,
@@ -40,7 +46,30 @@ const stream: IBootstrapStream =
   process.env.COMPILE_STREAM === "memory"
     ? new MemoryBootstrapStream()
     : new NoopBootstrapStream();
-const handlers = buildHandlers({ nia, store, receipts, bootstrap, stream });
+// Tensorlake (D1, D6). Default LocalFake when no creds — keeps demos
+// running offline. With TENSORLAKE_API_KEY set we wrap the real client
+// with the local-fallback shim so a sandbox outage drops to in-process
+// execution per failure mode #2 instead of crashing the gate / Tier-2.
+const tensorlake: ITensorlakeClient = (() => {
+  const fallback = new LocalFakeTensorlakeClient();
+  if (process.env.TENSORLAKE_API_KEY) {
+    const real = new RealTensorlakeClient({
+      apiKey: process.env.TENSORLAKE_API_KEY,
+      endpoint: process.env.TENSORLAKE_ENDPOINT ?? "https://api.tensorlake.ai",
+      phiModel: process.env.TENSORLAKE_PHI_MODEL ?? "phi-3-mini",
+    });
+    return new TensorlakeWithLocalFallback(real, fallback);
+  }
+  return fallback;
+})();
+const handlers = buildHandlers({
+  nia,
+  store,
+  receipts,
+  bootstrap,
+  stream,
+  tensorlake,
+});
 
 const server = new Server(
   { name: "compile", version: "0.0.0" },

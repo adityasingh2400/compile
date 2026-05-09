@@ -1,8 +1,15 @@
 import { transformSync } from "esbuild";
+import type { ITensorlakeClient } from "./tensorlake.js";
 
 /**
- * Tier-1 in-process executor. Compiles emitted TS to JS once via esbuild,
- * caches the resulting function by function_id, executes in ~1ms.
+ * Tier-1 + Tier-2 codified-function executor.
+ *
+ * Tier-1 path: compiles emitted TS to JS once via esbuild, caches the
+ * resulting function by function_id, executes in ~1ms.
+ *
+ * Tier-2 path (D1): routes through Phi-3-mini in Tensorlake via the
+ * supplied ITensorlakeClient. The codified "function" for Tier-2 is the
+ * envelope's prompt template + few-shots — execution = one runPhi call.
  *
  * Trust model: code MUST have already passed the gate (≥98% holdout match,
  * Zod-validated envelope, llmFallback-on-uncovered-branch). Vault entries
@@ -70,7 +77,31 @@ export async function runCodified(args: {
   code: string;
   input: unknown;
   tier: "tier_1" | "tier_2";
+  /** Required for tier_2 — Phi-3-mini sandbox. Optional for tier_1. */
+  tensorlake?: ITensorlakeClient;
 }): Promise<RunResult> {
+  if (args.tier === "tier_2") {
+    if (!args.tensorlake) {
+      throw new Error(
+        "runCodified: tier_2 requires a tensorlake client (D1 — Tier-2 must be real Phi-3-mini)",
+      );
+    }
+    const t0 = performance.now();
+    // For tier_2 the codified "function" is the prompt template — emitted
+    // code carries the prompt as the function body's string literal so
+    // execution = one Phi call. Until the synthesizer envelope shape splits
+    // tier_2 cleanly from tier_1 we treat the code itself as the prompt.
+    const phi = await args.tensorlake.runPhi({
+      prompt: args.code,
+      input: args.input,
+    });
+    return {
+      output: phi.output,
+      latency_ms: performance.now() - t0,
+      cost_usd: 0.0001,
+      tier_used: "tier_2",
+    };
+  }
   const fn = compileFunction({
     function_id: args.function_id,
     function_name: args.function_name,
@@ -79,8 +110,8 @@ export async function runCodified(args: {
   const t0 = performance.now();
   const output = await fn(args.input);
   const latency_ms = performance.now() - t0;
-  const cost_usd = args.tier === "tier_1" ? 0.0001 : 0.0005;
-  return { output, latency_ms, cost_usd, tier_used: args.tier };
+  const cost_usd = 0.0001;
+  return { output, latency_ms, cost_usd, tier_used: "tier_1" };
 }
 
 export function clearCompileCache(): void {

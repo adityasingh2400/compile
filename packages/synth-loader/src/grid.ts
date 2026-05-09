@@ -10,6 +10,7 @@ import {
 } from "@compile/schemas";
 import type { INiaClient } from "@compile/nia";
 import type { IBootstrapStream } from "@compile/stream";
+import type { ITensorlakeClient } from "@compile/runtime";
 import { expandSeeds } from "./variation.js";
 import { StubOracleClient, type IOracleClient } from "./oracle.js";
 import { StubCandidateClient, type ICandidateClient } from "./candidate.js";
@@ -41,6 +42,10 @@ export interface RunStage2Args {
   nia: INiaClient;
   oracle?: IOracleClient;
   candidate?: ICandidateClient;
+  /** Optional Tensorlake client. When supplied AND no `candidate` override
+   * was passed, runStage2 builds a StubCandidateClient that routes YELLOW
+   * pills through Phi-3-mini via runPhi (D1). Greens stay deterministic. */
+  tensorlake?: ITensorlakeClient;
   /** Fired for each synthetic cell as it transitions; lets the UI / Convex
    * subscription render the grid live. */
   onCell?: (cell: SyntheticCell) => void;
@@ -61,7 +66,8 @@ export interface RunStage2Args {
 
 export async function runStage2(args: RunStage2Args): Promise<SyntheticRun> {
   const oracle = args.oracle ?? new StubOracleClient();
-  const candidate = args.candidate ?? new StubCandidateClient();
+  const candidate =
+    args.candidate ?? new StubCandidateClient({ tensorlake: args.tensorlake });
   const seedCount = args.seed_count ?? 100;
   if (args.stream && !args.run_id) {
     throw new Error("runStage2: run_id required when stream is provided");
