@@ -22,6 +22,15 @@ export interface RealNiaClientOptions {
   vaultId: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  /**
+   * Per-request timeout in ms. Nia's free tier can be slow / flaky and the
+   * scan_repo path fans out one vault write per red call site in parallel,
+   * so a stalled connection used to hang scan_repo for ~30s × N. With a
+   * 10s cap a Nia outage degrades to "skip this write" not "kill the demo".
+   * Failures are already swallowed by safeVaultWrite — this just bounds
+   * how long we wait before declaring failure.
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -41,23 +50,38 @@ export class RealNiaClient implements INiaClient {
   private readonly vaultId: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
 
   constructor(opts: RealNiaClientOptions) {
     this.apiKey = opts.apiKey;
     this.vaultId = opts.vaultId;
     this.baseUrl = opts.baseUrl ?? DEFAULT_BASE;
     this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.timeoutMs = opts.timeoutMs ?? 10_000;
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-        ...(init.headers ?? {}),
-      },
-    });
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), this.timeoutMs);
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        ...init,
+        signal: init.signal ?? ac.signal,
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (err) {
+      if (ac.signal.aborted) {
+        throw new Error(`Nia ${init.method ?? "GET"} ${path} timed out after ${this.timeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(`Nia ${init.method ?? "GET"} ${path} → ${res.status}: ${body.slice(0, 400)}`);
