@@ -289,14 +289,18 @@ function placeNodes(
   const TAU = Math.PI * 2;
 
   // Cluster ring radius: keep clusters comfortably inside the canvas.
-  const ringR = N <= 2 ? 0.0 : N <= 4 ? 0.26 : 0.30;
+  const ringR = N <= 2 ? 0.0 : N <= 4 ? 0.34 : 0.38;
   // Phase offset keyed on workflow so each workflow's layout feels unique.
   const phase = (workflowIndex * 0.37) % 1;
 
-  // Per-cluster radius — proportional to sqrt(count) so dense clusters
-  // get bigger blobs but small ones don't shrivel.
+  // Per-cluster radius — proportional to sqrt(count). Kept small so
+  // every cluster reads as its own group instead of one giant blob.
   const total = samples.length || 1;
-  const baseR = N === 1 ? 0.42 : N === 2 ? 0.28 : N <= 4 ? 0.20 : 0.17;
+  const baseR = N === 1 ? 0.30 : N === 2 ? 0.18 : N <= 4 ? 0.12 : 0.10;
+
+  // Density multiplier: only every Nth node carries a label; the rest
+  // are unlabeled satellites that read as call volume in the demo.
+  const DENSITY = 8;
 
   const out: NodePlacement[] = [];
   clusterOrder.forEach((cluster, ci) => {
@@ -308,18 +312,21 @@ function placeNodes(
     const share = arr.length / total;
     const cr = baseR * (0.78 + 0.6 * Math.sqrt(share * N));
 
-    arr.forEach((s, j) => {
+    const totalCount = Math.max(arr.length * DENSITY, 14);
+    for (let j = 0; j < totalCount; j++) {
+      const labelSlot = j % DENSITY === 0 ? Math.floor(j / DENSITY) : -1;
+      const label = labelSlot >= 0 && labelSlot < arr.length ? arr[labelSlot]!.label : "";
       // Vogel disk fill: r = cr * sqrt((j+0.5)/count), theta = j*GOLDEN_ANGLE.
       // Add deterministic jitter so the lattice doesn't read as too perfect.
       const jitterSeed = (workflowIndex * 977 + ci * 211 + j * 131) % 1000;
       const jr = ((jitterSeed % 19) - 9) / 360; // ±~0.025
       const ja = ((jitterSeed % 13) - 6) / 60;
-      const r = cr * Math.sqrt((j + 0.5) / arr.length) + jr;
+      const r = cr * Math.sqrt((j + 0.5) / totalCount) + jr;
       const theta = j * GOLDEN_ANGLE + ja + ci * 0.7;
       const x = cx + Math.cos(theta) * r;
       const y = cy + Math.sin(theta) * r * 0.92;
-      out.push({ x, y, cluster, label: s.label, cx, cy, cr });
-    });
+      out.push({ x, y, cluster, label, cx, cy, cr });
+    }
   });
   return out;
 }
@@ -461,61 +468,6 @@ function WorkflowColumn({
         {/* soft halo — pure aesthetic, no border */}
         <div className="audit-org-wf-halo" aria-hidden />
 
-        {/* Gooey metaball layer — one merged blob per cluster that
-            naturally reshapes as nodes spawn in. Each visible node
-            contributes a soft disc; the SVG filter merges them with
-            a threshold so they read as a single organic surface. */}
-        <svg
-          className="audit-org-wf-blobs"
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          aria-hidden
-        >
-          <defs>
-            <filter id={`goo-${workflow.id}`}>
-              <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" />
-              <feColorMatrix
-                values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10"
-              />
-              <feBlend in="SourceGraphic" />
-            </filter>
-          </defs>
-          {pack.clusters.map((c) => {
-            const clusterNodes = placements.filter((p) => p.cluster === c.slug);
-            if (clusterNodes.length === 0) return null;
-            const isFocus = focusedCluster === c.slug;
-            const isFaded = focusedCluster != null && !isFocus;
-            // Disc radius scales with cluster size so denser clusters
-            // produce a larger merged blob. Tuned so adjacent nodes
-            // overlap well enough for the gooey filter to fuse them.
-            const baseR = Math.max(3.2, clusterNodes[0]!.cr * 18);
-            return (
-              <g
-                key={c.slug}
-                className={`audit-org-wf-blob ${isFocus ? "is-focus" : ""} ${
-                  isFaded ? "is-faded" : ""
-                }`}
-                data-cluster={c.slug}
-                filter={`url(#goo-${workflow.id})`}
-              >
-                {clusterNodes.map((n, idx) => {
-                  const placedIdx = placements.indexOf(n);
-                  const isVisible = placedIdx < visible;
-                  return (
-                    <circle
-                      key={idx}
-                      cx={n.x * 100}
-                      cy={n.y * 100}
-                      r={isVisible ? baseR : 0}
-                      className="audit-org-wf-blob-disc"
-                    />
-                  );
-                })}
-              </g>
-            );
-          })}
-        </svg>
-
         {/* Cluster tags float at each cluster centroid. Click to zoom. */}
         {pack.clusters.map((c, ci) => {
           const clusterNodes = placements.filter((p) => p.cluster === c.slug);
@@ -565,6 +517,7 @@ function WorkflowColumn({
           const isActive = activeSample === p && !focusedCluster;
           const isFocusCluster = focusedCluster === p.cluster;
           const isFadedNode = focusedCluster != null && !isFocusCluster;
+          const isLabeled = p.label !== "";
           // When a cluster is focused, scale-out its nodes so they're
           // easier to hover/click. We apply this via a CSS variable so
           // the radius push is GPU-cheap (transform).
@@ -576,7 +529,7 @@ function WorkflowColumn({
                 isActive ? "is-active" : ""
               } ${isFocusCluster ? "is-focus" : ""} ${
                 isFadedNode ? "is-faded" : ""
-              }`}
+              } ${isLabeled ? "is-labeled" : "is-satellite"}`}
               style={{
                 left: `${50 + (p.x - 0.5) * 100 * focusBoost}%`,
                 top: `${50 + (p.y - 0.5) * 100 * focusBoost}%`,
@@ -584,8 +537,7 @@ function WorkflowColumn({
               }}
               data-cluster={p.cluster}
               onMouseEnter={(e) => {
-                if (!isVisible) return;
-                if (isFadedNode) return;
+                if (!isVisible || !isLabeled || isFadedNode) return;
                 setHover({
                   nodeIdx: i,
                   x: e.clientX,
@@ -593,8 +545,7 @@ function WorkflowColumn({
                 });
               }}
               onMouseMove={(e) => {
-                if (!isVisible) return;
-                if (isFadedNode) return;
+                if (!isVisible || !isLabeled || isFadedNode) return;
                 setHover({
                   nodeIdx: i,
                   x: e.clientX,
@@ -602,13 +553,13 @@ function WorkflowColumn({
                 });
               }}
               onClick={(e) => {
-                if (!isVisible || isFadedNode) return;
+                if (!isVisible || !isLabeled || isFadedNode) return;
                 e.stopPropagation();
                 onOpenNode(i);
               }}
-              role="button"
-              tabIndex={isVisible && !isFadedNode ? 0 : -1}
-              aria-label={`Open synthetic call: ${p.label}`}
+              role={isLabeled ? "button" : undefined}
+              tabIndex={isVisible && isLabeled && !isFadedNode ? 0 : -1}
+              aria-label={isLabeled ? `Open synthetic call: ${p.label}` : undefined}
             >
               <span className="audit-org-node-dot" aria-hidden />
               <span className="audit-org-node-label">{p.label}</span>

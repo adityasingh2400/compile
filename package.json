@@ -27,7 +27,8 @@
     "bench": "npm run build -w @compile/synth-loader && npm run bench -w @compile/synth-loader",
     "daemon:fake": "node scripts/serve-fake-daemon.mjs",
     "convex:dev": "convex dev",
-    "convex:deploy": "convex deploy"
+    "convex:deploy": "convex deploy",
+    "pipeline:nia": "node --env-file=.env.local --import tsx scripts/run-pipeline-nia-bench.ts"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",
